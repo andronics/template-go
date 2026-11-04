@@ -49,6 +49,22 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      # release-please 17.6.0, bundled in the pinned action, lists every issue a commit footer
+      # names as ", closes" in the Release PR body, so merging the Release PR closes that issue.
+      # This step says ", refs" instead. Upstream fixed it in release-please 17.10.4
+      # (googleapis/release-please#2851): remove this step once the pinned action bundles it.
+      - name: Keep the Release PR from closing issues
+        if: steps.release.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          PR: ${{ fromJSON(steps.release.outputs.pr).number }}
+        run: |
+          body=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body --jq .body)
+          fixed=${body//, closes /, refs }
+          if [ "$body" = "$fixed" ]; then echo "Release PR #$PR closes no issues"; exit 0; fi
+          printf '%s\n' "$fixed" | gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --body-file -
+          echo "Release PR #$PR: closes -> refs"
+
 [% if has_cli %]
 
   # GoReleaser on the tag release-please just made: static binaries (CGO_ENABLED=0,

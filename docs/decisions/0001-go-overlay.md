@@ -1,6 +1,6 @@
 # 0001: The go stack overlay
 
-Status: Proposed
+Status: Accepted (2026-11-04)
 Date: 2026-11-04
 Authors: Stephen Cox
 
@@ -89,11 +89,13 @@ As template-python's 0001. Also:
 - A GoReleaser failure fails `Release`, so no image is built for that tag until the job is rerun.
 - `post-update.d` uses the runner's Go, which fetches `go.mod`'s version itself (`GOTOOLCHAIN=auto`).
 
-## Open questions
+## Resolved questions
 
-1. **Binaries on every `cli` and `service` release?** Always, a `release_binaries` question, or never.
-   Recommendation: always; a project that wants none removes the job.
-2. **GoReleaser inside `Release`, or its own workflow?** Recommendation: inside: one run says whether the
-   release worked.
-3. **No `puid_pgid`?** Recommendation: none, until a host needs it (its own record).
-4. **Windows binaries?** Recommendation: no, until a project asks.
+Approved by the brain coordinator for Stephen, 2026-11-04, with each open question answered as recommended:
+
+1. **Binaries on every `cli` and `service` release?** Yes, always: no `release_binaries` question; a
+   project that wants none removes the job.
+2. **GoReleaser inside `Release`, or its own workflow?** Inside: a job in `Release`, so one run says
+   whether the release worked.
+3. **No `puid_pgid`?** Dropped, until a host needs it (its own record).
+4. **Windows binaries?** No, until a project asks.

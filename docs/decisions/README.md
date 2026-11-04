@@ -5,4 +5,4 @@ a line below. **Read this index first.** The split itself is template-base's dec
 
 | # | Title | Status | Decision in one line |
 |---|---|---|---|
-| [0001](0001-go-overlay.md) | The go stack overlay | Proposed | A Go project is base + this overlay (+ template-container for an image), shaped as template-python: kinds `service`, `cli`, `library`; golangci-lint, `go vet`, `go test -race` with an 80% floor; release-please (`go`) tags, GoReleaser only attaches static binaries; a static distroless image whose HEALTHCHECK runs the built-in `health` command |
+| [0001](0001-go-overlay.md) | The go stack overlay | Accepted | A Go project is base + this overlay (+ template-container for an image), shaped as template-python: kinds `service`, `cli`, `library`; golangci-lint, `go vet`, `go test -race` with an 80% floor; release-please (`go`) tags, GoReleaser only attaches static binaries; a static distroless image whose HEALTHCHECK runs the built-in `health` command |

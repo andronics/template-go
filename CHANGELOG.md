@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.2](https://github.com/andronics/template-go/compare/v1.0.1...v1.0.2) (2026-11-04)
+
+
+### 🐛 Bug Fixes
+
+* **release:** keep the release PR from closing issues ([#6](https://github.com/andronics/template-go/issues/6)) ([cd56f01](https://github.com/andronics/template-go/commit/cd56f01fd405dc5ff8a6ab6d0223890f7af31fe1))
+
+
+### 📚 Documentation
+
+* **design:** give the record template a change log ([#7](https://github.com/andronics/template-go/issues/7)) ([1e2b257](https://github.com/andronics/template-go/commit/1e2b25776c66cfc7381b6cf5fed557359cf56ec4))
+
 ## [1.0.1](https://github.com/andronics/template-go/compare/v1.0.0...v1.0.1) (2026-11-04)
 
 

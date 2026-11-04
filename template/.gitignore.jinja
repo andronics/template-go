@@ -1,0 +1,35 @@
+# Template-owned: template-go (a slot: base's required entries are checked by scripts/checks.d/00-base.sh).
+# Go
+/dist/
+/bin/
+*.test
+*.out
+coverage.*
+
+# Local knowledge graphs (graphify): rebuilt locally, never committed
+.graphify/
+graphify-out/
+
+# Secrets and local state: never committed
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+private/
+/data/
+[% if 'docker' in contrib %]
+contrib/docker/config/
+contrib/docker/state/
+contrib/docker/secrets/
+[% endif %]
+
+# Editors and AI assistants' local files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+.claude/settings.local.json
+CLAUDE.local.md

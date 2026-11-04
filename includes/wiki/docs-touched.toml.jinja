@@ -1,0 +1,10 @@
+[% if has_cli %]
+  "internal/config/*",
+  "internal/cli/*",
+[% endif %]
+[% if kind == 'service' %]
+  "internal/api/*",
+[% endif %]
+[% if kind == 'library' %]
+  "doc.go",
+[% endif %]

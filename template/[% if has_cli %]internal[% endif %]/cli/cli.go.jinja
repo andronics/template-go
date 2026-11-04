@@ -1,0 +1,285 @@
+// Package cli is the `[[ project_name ]]` command.
+//
+// The wiki's CLI-Reference page is generated from New's command tree (scripts/gen-wiki),
+// so each command's Short and Long and each flag's usage are user documentation.
+package cli
+
+import (
+[% if kind == 'service' %]
+	"context"
+[% endif %]
+	"errors"
+	"fmt"
+	"io"
+[% if kind == 'service' %]
+	"log/slog"
+	"net"
+	"net/http"
+[% endif %]
+	"os"
+[% if kind == 'service' %]
+	"os/signal"
+	"strconv"
+[% endif %]
+	"strings"
+[% if kind == 'service' %]
+	"syscall"
+	"time"
+[% endif %]
+
+	"github.com/spf13/cobra"
+
+[% if kind == 'service' %]
+	"[[ module_path ]]/internal/api"
+[% endif %]
+	"[[ module_path ]]/internal/config"
+	"[[ module_path ]]/internal/version"
+)
+
+// Exit codes: the CLI-Reference page lists them.
+const (
+	exitOK      = 0
+	exitFailure = 1
+	exitUsage   = 2
+)
+
+// EnvAnnotation names a flag's environment variable, for --help and the wiki.
+const EnvAnnotation = "env"
+
+// usageError is a bad command line: exit 2, as a config error.
+type usageError struct{ err error }
+
+func (e usageError) Error() string { return e.err.Error() }
+
+// errFailure is an error that has been reported already: exit 1, nothing more printed.
+var errFailure = errors.New("failed")
+
+// Main runs the command line with args and returns the exit code: 0, 1 for a failure while
+// running, 2 for bad usage or an invalid configuration.
+func Main(args []string, stdout, stderr io.Writer) int {
+	root := New(stdout, stderr)
+	root.SetArgs(args)
+	err := root.Execute()
+	var cfgErr *config.Error
+	var usage usageError
+	switch {
+	case err == nil:
+		return exitOK
+	case errors.Is(err, errFailure):
+		return exitFailure
+	case errors.As(err, &cfgErr):
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
+		return exitUsage
+	case errors.As(err, &usage) || strings.HasPrefix(err.Error(), "unknown command"):
+		_, _ = fmt.Fprintf(stderr, "error: %v\nRun '[[ project_name ]] --help' for usage.\n", err)
+		return exitUsage
+	default:
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
+		return exitFailure
+	}
+}
+
+// New is the command tree, without running it: Main runs it, and gen-wiki documents it.
+func New(stdout, stderr io.Writer) *cobra.Command {
+	root := &cobra.Command{
+		Use:           "[[ project_name ]]",
+		Short:         [[ description | replace('\n', ' ') | tojson ]],
+		SilenceErrors: true,
+		SilenceUsage:  true,
+	}
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	root.CompletionOptions.DisableDefaultCmd = true
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
+	root.AddCommand(versionCmd(), configCmd())
+[% if kind == 'service' %]
+	root.AddCommand(serveCmd(), healthCmd())
+[% endif %]
+	return root
+}
+
+// noArgs refuses positional arguments, as a usage error.
+func noArgs(cmd *cobra.Command, args []string) error {
+	if len(args) > 0 {
+		return usageError{fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())}
+	}
+	return nil
+}
+
+// configFlag adds --config to cmd; its value is read by load.
+func configFlag(cmd *cobra.Command) *string {
+	path := cmd.Flags().StringP("config", "c", "", "Config file (default "+config.DefaultPath+"; missing is fine).")
+	_ = cmd.Flags().SetAnnotation("config", EnvAnnotation, []string{config.ConfigEnv})
+	return path
+}
+
+// load reads the configuration as every command does: --config, else its variable, else the default.
+func load(path string) (config.Config, error) {
+	return config.Load(path, os.LookupEnv)
+}
+
+func versionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the version.",
+		Args:  noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), version.Version)
+			return err
+		},
+	}
+}
+
+func configCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "Print the effective configuration and where each value came from. Secrets: set or unset.",
+		Args:  noArgs,
+	}
+	path := configFlag(cmd)
+	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		cfg, err := load(*path)
+		if err != nil {
+			return err
+		}
+		for _, s := range config.Settings {
+			shown := fmt.Sprint(cfg.Values[s.Key])
+			// A secret shows whether it is set, never its value.
+			if s.Secret {
+				shown = "(unset)"
+				if v := cfg.Values[s.Key]; v != nil && v != "" {
+					shown = "******** (set)"
+				}
+			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s = %s  (%s)\n", s.Key, shown, cfg.Sources[s.Key]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return cmd
+}
+[% if kind == 'service' %]
+
+func serveCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Run the HTTP server.",
+		Long:  "Run the HTTP server until SIGINT or SIGTERM, then finish the requests in flight (up to 10 seconds).",
+		Args:  noArgs,
+	}
+	path := configFlag(cmd)
+	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		cfg, err := load(*path)
+		if err != nil {
+			return err
+		}
+		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return Serve(ctx, cfg, cmd.ErrOrStderr())
+	}
+	return cmd
+}
+
+// Serve runs the HTTP server until ctx is done, then shuts it down gracefully.
+func Serve(ctx context.Context, cfg config.Config, logs io.Writer) error {
+	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slogLevel(cfg.LogLevel)}))
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)))
+	if err != nil {
+		return err
+	}
+	server := &http.Server{
+		Handler:           api.New(cfg, logger).Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
+	}
+	served := make(chan error, 1)
+	go func() { served <- server.Serve(listener) }()
+	logger.Info("listening", "address", listener.Addr().String(), "version", version.Version)
+
+	select {
+	case err := <-served:
+		return err
+	case <-ctx.Done():
+	}
+	logger.Info("shutting down")
+	shutdown, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdown); err != nil {
+		return err
+	}
+	if err := <-served; !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// slogLevel maps log_level to slog's levels.
+func slogLevel(level string) slog.Level {
+	switch level {
+	case "DEBUG":
+		return slog.LevelDebug
+	case "WARNING":
+		return slog.LevelWarn
+	case "ERROR":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
+func healthCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "health",
+		Short: "Check that the server answers: exit 0 if it is healthy, 1 if not.",
+		Long: "Load the configuration as serve does, then GET " + api.HealthPath + " (with --ready, " + api.ReadyPath +
+			") from the server it describes. Exit 0 on a 2xx answer, 1 on anything else, 2 on a configuration error. " +
+			"The image's HEALTHCHECK runs it.",
+		Args: noArgs,
+	}
+	path := configFlag(cmd)
+	ready := cmd.Flags().Bool("ready", false, "Check readiness ("+api.ReadyPath+") instead of liveness ("+api.HealthPath+").")
+	timeout := cmd.Flags().Duration("timeout", 4*time.Second, "How long to wait for the answer.")
+	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		cfg, err := load(*path)
+		if err != nil {
+			return err
+		}
+		target := api.HealthPath
+		if *ready {
+			target = api.ReadyPath
+		}
+		if err := Check(cmd.Context(), cfg, target, *timeout); err != nil {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "unhealthy: %v\n", err)
+			return errFailure
+		}
+		return nil
+	}
+	return cmd
+}
+
+// Check GETs path from the server cfg describes, and fails unless it answers 2xx in time.
+func Check(ctx context.Context, cfg config.Config, path string, timeout time.Duration) error {
+	host := cfg.Host
+	// A wildcard address listens on loopback too.
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	url := "http://" + net.JoinHostPort(host, strconv.Itoa(cfg.Port)) + path
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("%s answered %s", url, resp.Status)
+	}
+	return nil
+}
+[% endif %]

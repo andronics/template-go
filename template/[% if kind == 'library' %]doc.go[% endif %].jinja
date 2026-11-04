@@ -1,0 +1,6 @@
+[% set summary = description | replace('\n', ' ') | trim %]
+// Package [[ go_package ]] is [[ project_name ]]'s public API: [[ summary[:-1] if summary.endswith('.') else summary ]].
+//
+// The wiki's API-Reference page is generated from this package's documentation
+// (go doc -all, through scripts/gen-wiki), so doc comments are user documentation.
+package [[ go_package ]]

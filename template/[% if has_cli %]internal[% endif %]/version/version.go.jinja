@@ -1,0 +1,11 @@
+// Package version says which release and commit this build is.
+package version
+
+// Version is the release: release-please writes it on each Release PR (the marker below),
+// and CI checks it against .release-please-manifest.json. Never edit it by hand.
+const Version = "0.0.0" // x-release-please-version
+
+// Revision is the commit the binary was built from. GoReleaser and the Dockerfile set it
+// with -ldflags "-X [[ module_path ]]/internal/version.Revision=<sha>"; go run and go test
+// leave it "unknown".
+var Revision = "unknown"

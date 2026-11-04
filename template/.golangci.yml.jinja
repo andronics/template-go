@@ -1,0 +1,39 @@
+# Template-owned: template-go. golangci-lint v2: what `golangci-lint run` and
+# `golangci-lint fmt` check, in CI (stack-ci.yml) and pre-commit alike.
+version: "2"
+
+run:
+  # The integration tests build only with their tag: lint them too.
+  build-tags: [integration]
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - forbidigo
+    - gosec
+    - misspell
+    - noctx
+    - nolintlint
+    - revive
+    - unconvert
+    - usestdlibvars
+  settings:
+    forbidigo:
+      # Only the CLI writes stdout, through its command's writer; logging goes through log/slog.
+      forbid:
+        - pattern: ^(fmt\.Print(|f|ln)|print|println)$
+    nolintlint:
+      # A //nolint names its linter and says why.
+      require-explanation: true
+      require-specific: true
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - [[ module_path ]]

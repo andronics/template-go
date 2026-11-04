@@ -1,0 +1,34 @@
+#!/bin/sh
+# Template-owned: template-go. The unit tests as CI runs them: the race detector, and an 80%
+# coverage floor over [% if has_cli %]internal/...[% else %]the module's packages (scripts/ isn't counted)[% endif %]. Extra arguments go to `go test`.
+# Quiet on a pass: go test's package lines, then one summary line.
+set -eu
+cd "$(dirname "$0")/.."
+
+FLOOR=80
+profile=$(mktemp)
+trap 'rm -f "$profile"' EXIT
+
+go test -race -covermode=atomic -coverprofile="$profile" "$@" ./...
+
+# The profile's lines are "file:start,end statements count"; count each block once.
+[% if has_cli %]
+counted='/internal/'
+[% else %]
+counted='.'
+[% endif %]
+awk -v floor="$FLOOR" -v counted="$counted" -v module="$(go list -m)" '
+    NR == 1 { next }
+    {
+        file = $1; sub(/:.*/, "", file); sub("^" module, "", file)
+        if (file !~ counted || file ~ "^/scripts/") next
+        if (!($1 in seen)) { seen[$1] = $2; total += $2 }
+        if ($3 > 0 && !($1 in hit)) { hit[$1] = 1; covered += $2 }
+    }
+    END {
+        if (total == 0) { print "coverage: no statements to cover"; exit 0 }
+        pct = 100 * covered / total
+        printf "coverage: %.1f%% of statements (floor %d%%)\n", pct, floor
+        if (pct < floor) { print "error: coverage is below the floor: add tests, never lower it"; exit 1 }
+    }
+' "$profile"

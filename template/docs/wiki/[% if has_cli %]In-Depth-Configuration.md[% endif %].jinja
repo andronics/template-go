@@ -1,0 +1,41 @@
+[% import 'includes/layer.jinja' as layer with context %]
+# In-Depth Configuration
+
+## Where configuration comes from
+
+Every setting can be given in four places, and the first one that has it wins:
+
+1. `[[ env_prefix ]]<KEY>_FILE`: the path of a file holding the value (Docker and Kubernetes secrets)
+2. `[[ env_prefix ]]<KEY>`: an environment variable
+3. the YAML config file: `[[ env_prefix ]]CONFIG` or `--config`, default `/etc/[[ project_name ]]/config.yaml`. A missing file is fine.
+4. the built-in default
+
+`<KEY>` is the setting's key in upper case, with the dots as underscores: `listen.port` is `[[ env_prefix ]]LISTEN_PORT`.
+A value of the wrong type, such as `0.5` or `true` for an integer or a list for a string, is an error that names the setting.
+`[[ project_name ]] config` prints the effective value of every setting and where it came from, with secrets masked.
+`internal/config/config.go` declares the settings, in its `Settings` table.
+
+## Settings
+
+Generated from the code: don't edit the table, run `[[ layer.gen_wiki ]]`.
+
+<!-- generated:start settings -->
+<!-- generated:end settings -->
+
+<!-- guidance: below the table, explain anything a one-line description can't: how settings interact, valid ranges, performance trade-offs. -->
+
+## Secrets
+
+A secret setting is read from all four places, like any other, so nothing stops it being set in the config file or a plain environment variable. Don't: `docker inspect` and `ps` show the variable. Use the `_FILE` variant and mount the value as a file:
+
+- Docker: `[[ env_prefix ]]<KEY>_FILE=/run/secrets/<name>` with a secrets file or bind mount
+- Kubernetes: a Secret mounted as a volume (SOPS-encrypted in the GitOps repo)
+- systemd: `LoadCredential=` and `%d/<name>`
+
+<!-- guidance: list this project's secrets, or say there are none. -->
+
+## Examples
+
+A complete config file with every default is in [contrib/[[ project_name ]].example.yaml]([[ repo_url ]]/blob/main/contrib/[[ project_name ]].example.yaml).
+
+<!-- guidance: two or three real-world configurations, each with a sentence on when you'd use it. -->

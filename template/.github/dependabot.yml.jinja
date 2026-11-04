@@ -1,0 +1,34 @@
+# Template-owned: template-go (a slot: the stack overlay adds its ecosystems).
+# Weekly dependency PRs; "chore(deps)" keeps them out of the changelog's headline sections.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore(deps)
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(deps)
+[% if container_image %]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    # The builder's Go must stay inside the CI matrix: take patch-level image
+    # updates only, and move the minor version by hand with go.mod and stack-ci.yml.
+    ignore:
+      - dependency-name: golang
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    commit-message:
+      prefix: chore(deps)
+[% endif %]

@@ -1,0 +1,6 @@
+
+```sh
+go mod download                          # Go >= [[ go_version ]]
+sh scripts/test.sh                       # tests, with the race detector (80% coverage floor)
+golangci-lint run && go vet ./...        # lint and vet
+```

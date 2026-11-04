@@ -1,0 +1,98 @@
+[% import 'includes/layer.jinja' as layer with context %]
+# [[ project_name ]]
+
+[% if container_image %]
+[![CI]([[ repo_url ]]/actions/workflows/base-ci.yml/badge.svg)]([[ repo_url ]]/actions/workflows/base-ci.yml)
+[![Release](https://img.shields.io/github/v/release/[[ github_owner ]]/[[ project_name ]]?sort=semver)]([[ repo_url ]]/releases)
+[![Image](https://img.shields.io/badge/image-ghcr.io-blue?logo=docker)]([[ repo_url ]]/pkgs/container/[[ project_name ]])
+[% else %]
+[![CI]([[ repo_url ]]/actions/workflows/base-ci.yml/badge.svg)]([[ repo_url ]]/actions/workflows/base-ci.yml)
+[![Release](https://img.shields.io/github/v/release/[[ github_owner ]]/[[ project_name ]]?sort=semver)]([[ repo_url ]]/releases)
+[% endif %]
+
+[[ description ]]
+
+<!-- guidance: two or three sentences: what problem this solves and for whom. Then delete this comment. -->
+
+## Quick Start
+[% if kind == 'service' and container_image %]
+
+```sh
+docker run -d --name [[ project_name ]] -p 127.0.0.1:[[ port ]]:[[ port ]] [[ image ]]:latest
+curl http://127.0.0.1:[[ port ]][[ health_path ]]
+```
+[% elif has_cli %]
+
+```sh
+[[ layer.install_cli ]]
+[[ project_name ]] --help
+```
+[% else %]
+
+```sh
+[[ layer.install_lib ]]
+```
+
+```[[ layer.code_lang ]]
+[[ layer.import_snippet ]]
+```
+[% endif %]
+
+The full walk-through is in the wiki's [Quick Start]([[ repo_url ]]/wiki/Quick-Start).
+
+## Documentation
+
+Everything is in the **[wiki]([[ repo_url ]]/wiki)**. Its source is [`docs/wiki/`](docs/wiki/), in this
+repository, reviewed with the code.
+
+- [Introduction]([[ repo_url ]]/wiki/Introduction): what it is and how it works
+[% if has_cli %]
+- [In-Depth Configuration]([[ repo_url ]]/wiki/In-Depth-Configuration): every setting
+[% elif kind == 'library' %]
+- [API Reference]([[ repo_url ]]/wiki/API-Reference): the public API
+[% endif %]
+[% if contrib %]
+- [Deployment]([[ repo_url ]]/wiki/Deployment): [[ contrib | join(', ') ]]
+[% endif %]
+- [Troubleshooting]([[ repo_url ]]/wiki/Troubleshooting) and [FAQ]([[ repo_url ]]/wiki/Frequently-Asked-Questions)
+- [Contributing]([[ repo_url ]]/wiki/Contributing) and [Release Process]([[ repo_url ]]/wiki/Release-Process)
+
+## For AI assistants
+
+Built with AI assistants; every change gets human review. **[AGENTS.md](AGENTS.md) and
+[.agents/stack.md](.agents/stack.md) are the only instruction files** (stack, commands, rules, definition of
+done, docs map). Read them instead of this README.
+
+| Assistant | Entry point |
+|---|---|
+| Claude Code | [CLAUDE.md](CLAUDE.md) (imports both) + [.claude/settings.json](.claude/settings.json) |
+| Codex, Cursor, Copilot coding agent | AGENTS.md, natively ([Copilot](.github/copilot-instructions.md), [Cursor](.cursor/rules/project.mdc) pointers) |
+| Gemini CLI | [GEMINI.md](GEMINI.md) (imports both) |
+| Chat without repo access | [docs/ai/prompts.md](docs/ai/prompts.md), "Context for a chat assistant" |
+
+Humans: kick-off prompts are in [docs/ai/prompts.md](docs/ai/prompts.md), and the review checklist in
+[docs/ai/review-checklist.md](docs/ai/review-checklist.md).
+
+## Development
+[% include 'includes/readme/development.md.jinja' %]
+
+New project? Fill in `.github/repository.toml` (the description, `homepage` = the wiki, `topics`), then run
+`python3 scripts/repo-metadata.py` to set GitHub's About box from it; CI warns when the two drift.
+
+The workflow is: a branch, Conventional Commit PR titles, squash merge. Releases are automated by
+release-please. See [Contributing]([[ repo_url ]]/wiki/Contributing).
+
+This project was generated from [template-base](https://github.com/andronics/template-base) and
+[template-go](https://github.com/andronics/template-go)[% if container_image %] (and
+[template-container](https://github.com/andronics/template-container) for the image)[% endif %]. Template
+fixes arrive as a weekly *Template update* PR per template.
+
+## License
+
+[% if license == 'Unlicense' %]
+Released into the public domain under the [Unlicense](LICENSE).
+[% elif license == 'Proprietary' %]
+Proprietary. Copyright © [[ copyright_holder ]], all rights reserved. See [LICENSE](LICENSE).
+[% else %]
+[[ license ]]. See [LICENSE](LICENSE).
+[% endif %]

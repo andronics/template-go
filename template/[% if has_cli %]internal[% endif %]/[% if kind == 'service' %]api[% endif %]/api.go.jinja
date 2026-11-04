@@ -1,0 +1,80 @@
+// Package api is the HTTP API.
+//
+// The wiki's HTTP-API-Reference endpoint table is generated from Routes (scripts/gen-wiki):
+// give every route a Summary.
+package api
+
+import (
+	"encoding/json"
+	"log/slog"
+	"net/http"
+
+	"[[ module_path ]]/internal/config"
+	"[[ module_path ]]/internal/version"
+)
+
+// HealthPath is the liveness endpoint: the image's HEALTHCHECK (`[[ project_name ]] health`) and the probes ask it.
+const HealthPath = "[[ health_path ]]"
+
+// ReadyPath is the readiness endpoint (`[[ project_name ]] health --ready`).
+const ReadyPath = "/readyz"
+
+// Route is one endpoint.
+type Route struct {
+	Method  string
+	Path    string
+	Summary string
+	Handler http.HandlerFunc
+}
+
+// API holds what the handlers need.
+type API struct {
+	Config config.Config
+	Logger *slog.Logger
+}
+
+// New builds the API from the loaded configuration.
+func New(cfg config.Config, logger *slog.Logger) *API {
+	return &API{Config: cfg, Logger: logger}
+}
+
+// Routes is every endpoint, in the order the wiki lists them.
+func (a *API) Routes() []Route {
+	return []Route{
+		{http.MethodGet, HealthPath, "Liveness: the process is up", a.health},
+		{http.MethodGet, ReadyPath, "Readiness: able to serve requests", a.ready},
+		{http.MethodGet, "/version", "The running version", a.version},
+	}
+}
+
+// Handler serves the routes.
+func (a *API) Handler() http.Handler {
+	mux := http.NewServeMux()
+	for _, r := range a.Routes() {
+		mux.HandleFunc(r.Method+" "+r.Path, r.Handler)
+	}
+	return mux
+}
+
+func (a *API) health(w http.ResponseWriter, _ *http.Request) {
+	a.json(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (a *API) ready(w http.ResponseWriter, _ *http.Request) {
+	// Check what the service depends on (database, upstream API) here, and answer
+	// 503 with {"error": "<why>"} when it can't serve. Liveness must stay dependency-free.
+	a.json(w, http.StatusOK, map[string]string{"status": "ready"})
+}
+
+func (a *API) version(w http.ResponseWriter, _ *http.Request) {
+	a.json(w, http.StatusOK, map[string]string{"version": version.Version})
+}
+
+// json writes body as the response, with status.
+func (a *API) json(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		a.Logger.Warn("writing a response failed", "error", err)
+	}
+}

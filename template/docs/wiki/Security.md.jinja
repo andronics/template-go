@@ -1,0 +1,39 @@
+# Security
+
+## Threat model
+
+<!-- guidance: what this protects, from whom, and what is out of scope. What's exposed (ports, endpoints), who should be able to reach it, what it trusts (headers, upstreams, input files), and what an attacker gains if it is compromised. -->
+
+## Secrets
+
+[% if has_cli %]
+- Give each secret through `[[ env_prefix ]]<KEY>_FILE`, a mounted file. A secret setting is also read from its plain variable and the config file, like any setting, so keep it out of both: `docker inspect` and `ps` show variables. See [In-Depth Configuration](In-Depth-Configuration#secrets).
+- Values are never logged. Logs and `[[ project_name ]] config` show where a value came from, never the value itself.
+[% else %]
+- The library never reads, logs or stores credentials on its own: callers pass them in.
+[% endif %]
+- CI scans every commit with gitleaks, and secrets in history fail the build.
+
+<!-- guidance: list each secret, what it grants, and how to rotate it. -->
+
+## Hardening
+
+[% if container_image %]
+- **Container:** runs as uid 1000[% if puid_pgid %] (after root fixes the state directory's ownership)[% endif %], with a read-only root filesystem and all capabilities dropped (Compose/Kubernetes manifests).
+[% endif %]
+[% if 'k8s' in contrib %]
+- **Kubernetes:** *restricted* Pod Security Standard, `seccompProfile: RuntimeDefault`, no service-account token, and a NetworkPolicy that admits only the ingress controller.
+[% endif %]
+[% if 'systemd' in contrib %]
+- **systemd:** a dedicated system user, `ProtectSystem=strict`, no capabilities, a system-call filter, and restricted address families.
+[% endif %]
+- **Supply chain:** dependencies are pinned in the lock file and updated weekly by Dependabot. GitHub Actions are pinned to commit SHAs.
+[% if dependabot_automerge != 'off' %]
+- **Dependency auto-merge:** Dependabot [[ 'patch and minor' if dependabot_automerge == 'minor' else 'patch' ]] updates get auto-merge queued by `dependabot-automerge.yml`: they still need a code owner's approval, then merge once CI passes.
+[% endif %]
+
+<!-- guidance: input validation, authentication and authorisation, rate limiting: what this project does and where. -->
+
+## Reporting a vulnerability
+
+Report privately through [GitHub security advisories]([[ repo_url ]]/security/advisories/new), never in a public issue.

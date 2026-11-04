@@ -1,0 +1,87 @@
+[% import 'includes/layer.jinja' as layer with context %]
+# Deployment
+
+[% if contrib %]
+Manifests live in [`contrib/`]([[ repo_url ]]/tree/main/contrib), versioned with the code. release-please moves their image tag to each new release. Every option keeps the same hardening: a non-root user, read-only root, no capabilities.
+[% else %]
+How to run [[ project_name ]] in production, and how to scale it.
+[% endif %]
+[% if kind == 'service' %]
+
+## Process model
+
+`[[ project_name ]] serve` runs **one process**. `net/http` serves each request on its own goroutine, so one process uses every core it is given; background work (pollers, workers, schedulers) runs in goroutines beside it, stopped by the same signal that stops the server.
+
+- **Scale by replicas.** More throughput means more pods (or more instances behind the proxy), each one process.
+- **A scheduler runs once per process.** A job scheduled at start-up runs on every replica. Keep one instance (`replicas: 1`[% if 'k8s' in contrib %], the manifest's default, with `strategy: Recreate` so an update never runs two at once[% endif %]) while the service has one, or move the scheduler to its own singleton Deployment (`replicas: 1`, the same image with a scheduler subcommand as `args`) and scale the API on its own.
+- **Leader election** (a Kubernetes Lease, a database lock) is the app's to add if it ever needs several schedulers with one active; the template ships none.
+- **Shutdown:** on `SIGTERM` or `SIGINT` the server stops accepting connections and finishes the requests in flight, for up to 10 seconds.
+[% endif %]
+[% if 'docker' in contrib %]
+
+## Docker Compose
+
+```sh
+mkdir -p config state
+cp contrib/[[ project_name ]].example.yaml config/config.yaml   # edit it
+docker compose -f contrib/docker/compose.yml up -d
+docker compose -f contrib/docker/compose.yml logs -f
+```
+
+The port binds to `127.0.0.1` only: put a reverse proxy (Traefik) in front for TLS and remote access.
+Secrets go in files mounted read-only, passed as `[[ env_prefix ]]<KEY>_FILE`.
+[% endif %]
+[% if 'k8s' in contrib %]
+
+## Kubernetes
+
+[`contrib/k8s`]([[ repo_url ]]/tree/main/contrib/k8s) is a kustomize base. It contains a Namespace with the *restricted* Pod Security Standard, a Deployment, a Service, a NetworkPolicy, and a ConfigMap generated from `config.yaml`.
+
+```sh
+kubectl apply -k contrib/k8s                       # directly
+```
+
+With Flux, point an overlay in the cluster repo at a release:
+
+```yaml
+# kustomization.yaml in the GitOps repo
+resources:
+  - https://github.com/[[ github_owner ]]/[[ project_name ]]//contrib/k8s?ref=v1.2.3
+patches: []          # replicas, resources, the ConfigMap's config.yaml, ingress
+```
+
+The NetworkPolicy admits only the `traefik` namespace: add each in-cluster client. State is on an `emptyDir`; swap it for a PersistentVolumeClaim if it must survive a restart. Secrets: SOPS-encrypted Secrets in the GitOps repo, mounted as files.
+[% endif %]
+[% if 'systemd' in contrib %]
+
+## systemd
+
+```sh
+install -Dm644 contrib/systemd/[[ project_name ]].sysusers /usr/lib/sysusers.d/[[ project_name ]].conf
+systemd-sysusers
+[% include 'includes/wiki/deploy-systemd-install.sh.jinja' %]
+install -Dm644 contrib/[[ project_name ]].example.yaml /etc/[[ project_name ]]/config.yaml   # edit it
+install -Dm644 contrib/systemd/[[ project_name ]].service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now [[ project_name ]]
+journalctl -u [[ project_name ]] -f
+```
+
+The binary is static, from the release's assets (`checksums.txt` beside it). The unit runs as the `[[ project_name ]]` system user in a tight sandbox (`systemd-analyze security [[ project_name ]]` scores it). If a feature needs more access, loosen exactly one directive, with a comment saying why.
+[% endif %]
+
+## Upgrading
+
+Read the [CHANGELOG]([[ repo_url ]]/blob/main/CHANGELOG.md) entries between your version and the new one; breaking changes are marked ⚠.[% if contrib %] Then:
+[% endif %]
+
+[% if 'docker' in contrib %]
+- Compose: change the image tag, then `docker compose up -d`.
+[% endif %]
+[% if 'k8s' in contrib %]
+- Kubernetes: change `?ref=` (or the `images:` tag) in the overlay, and let Flux reconcile.
+[% endif %]
+[% if 'systemd' in contrib %]
+- systemd: [[ layer.systemd_upgrade ]], then `systemctl restart [[ project_name ]]`.
+[% endif %]
+
+<!-- guidance: data or config migrations a release needs, and how to roll back. -->

@@ -1,0 +1,2 @@
+- The version lives in `[% if has_cli %]internal/version/version.go[% else %]version.go[% endif %]` (`const Version`, marked `x-release-please-version`) and `.release-please-manifest.json`. CI fails if the two disagree.
+- Go's rule for majors: from `v2.0.0` the module path must end in `/v2` (go.mod and every import), or `go get` and `go install` can't fetch it. Change it in the PR that makes the breaking change.

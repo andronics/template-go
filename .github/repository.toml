@@ -1,0 +1,4 @@
+# GitHub's About box for this repository.
+description = "Copier stack overlay for Go projects (Go modules, golangci-lint, go test, GoReleaser) on template-base: CI, releases, the wiki, the image"
+homepage = ""
+topics = ["copier", "copier-template", "go", "golang", "template"]

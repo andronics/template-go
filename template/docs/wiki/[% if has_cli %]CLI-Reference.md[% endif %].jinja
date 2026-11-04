@@ -1,0 +1,21 @@
+[% import 'includes/layer.jinja' as layer with context %]
+# CLI Reference
+
+`[[ project_name ]] --help` lists the commands. `[[ project_name ]] <command> --help` shows a command's options.
+
+## Commands
+
+Generated from the code: don't edit, run `[[ layer.gen_wiki ]]`.
+
+<!-- generated:start cli -->
+<!-- generated:end cli -->
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | Failure while running |
+| 2 | Bad usage or invalid configuration |
+
+<!-- guidance: add project-specific exit codes, and worked examples of common invocations. -->

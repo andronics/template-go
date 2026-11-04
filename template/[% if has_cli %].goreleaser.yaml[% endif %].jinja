@@ -1,0 +1,48 @@
+# Template-owned: template-go. GoReleaser builds the release binaries; release-please owns the
+# tag, the changelog and the GitHub Release (template-go decision 0001). go-release.yml runs it
+# on each release, and stack-ci.yml checks this file and makes a snapshot build.
+version: 2
+
+project_name: [[ project_name ]]
+
+builds:
+  - id: [[ project_name ]]
+    main: ./cmd/[[ project_name ]]
+    binary: [[ project_name ]]
+    # Static and reproducible: no libc, no local paths, the commit's time.
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    # Only the revision: release-please writes version.Version in the code.
+    ldflags:
+      - -s -w -X [[ module_path ]]/internal/version.Revision={{ .FullCommit }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  # The bare binaries, attached as they are.
+  - formats: [binary]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+# release-please writes the changelog and the release notes.
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: [[ github_owner ]]
+    name: [[ project_name ]]
+  # Attach to the release release-please made, keeping its name and notes.
+  mode: keep-existing

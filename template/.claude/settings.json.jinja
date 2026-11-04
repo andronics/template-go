@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "attribution": {"commit": "", "pr": "", "sessionUrl": false},
+  "permissions": {
+    "allow": [
+      "Bash(gh:*)",
+      "Bash(sh scripts/checks.sh)",
+      "Bash(go mod download:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(go build:*)",
+      "Bash(go vet:*)",
+      "Bash(go test:*)",
+      "Bash(go run ./scripts/gen-wiki:*)",
+      "Bash(golangci-lint:*)",
+      "Bash(sh scripts/test.sh:*)",
+[% if has_cli %]
+      "Bash(go run ./cmd/[[ project_name ]]:*)",
+      "Bash(goreleaser check:*)",
+[% endif %]
+[% if container_image or contrib %]
+      "Bash(scripts/check-manifests.sh)",
+[% endif %]
+      "Bash(python3 scripts/check-wiki.py:*)",
+      "Bash(scripts/check-docs-secrets.sh:*)",
+      "Bash(scripts/check-markdown.sh)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ],
+    "deny": [
+      "Edit(CHANGELOG.md)",
+      "Edit(.release-please-manifest.json)",
+      "Edit(.copier-answers.*.yml)",
+      "Bash(git push * main)",
+      "Bash(git push * main *)",
+      "Bash(git push *:main)",
+      "Bash(git push *:main *)",
+      "Bash(git push *refs/heads/main)",
+      "Bash(git push *refs/heads/main *)",
+      "Bash(git push *--force*)",
+      "Bash(git push * -f*)",
+      "Bash(git push *+*)",
+      "Bash(git push *--mirror*)",
+      "Bash(git push *--tags*)",
+      "Bash(git push *--follow-tags*)",
+      "Bash(git tag:*)",
+      "Bash(gh release:*)",
+      "Bash(gh api *releases*)",
+      "Bash(gh repo delete:*)",
+      "Bash(gh repo archive:*)",
+      "Bash(gh pr create *-R *)",
+      "Bash(gh pr create *--repo*)",
+      "Read(./go.sum)",
+      "Read(./coverage.out)",
+      "Read(./dist/**)",
+      "Read(./.graphify/**)",
+      "Read(./graphify-out/**)",
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(secrets/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|MultiEdit|Write|NotebookEdit",
+        "hooks": [{"type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/repo-boundary.py\""}]
+      }
+    ]
+  }
+}

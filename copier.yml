@@ -1,0 +1,277 @@
+# template-go: the stack overlay for a Go project (Go modules, golangci-lint, go test, GoReleaser).
+# It goes on top of template-base, whose answers it reads (it never asks base's questions again):
+#
+#   uvx copier copy --trust gh:andronics/template-base my-project
+#   uvx copier copy --trust gh:andronics/template-go my-project
+#   uvx copier copy --trust gh:andronics/template-container my-project   # with container_image
+#
+# As the stack overlay it fills base's slots (stack-ci.yml, .agents/stack.md, .gitignore,
+# .pre-commit-config.yaml, .claude/settings.json, README.md, dependabot.yml) and adds
+# go-* workflows and scripts/checks.d/20-go.sh (docs/decisions/0001).
+
+_min_copier_version: "9.19.0"
+_subdirectory: template
+_templates_suffix: .jinja
+_answers_file: .copier-answers.stack-go.yml
+_external_data:
+  base: .copier-answers.base.yml
+
+# GitHub Actions uses ${{ }}, so Jinja uses [[ ]] / [% %] instead.
+_envops:
+  variable_start_string: "[["
+  variable_end_string: "]]"
+  block_start_string: "[%"
+  block_end_string: "%]"
+  comment_start_string: "[#!"
+  comment_end_string: "!#]"
+  keep_trailing_newline: true
+  trim_blocks: true
+  lstrip_blocks: true
+
+# Written once, then the project's: `copier update` never touches them again.
+# Template-owned files (workflows, scripts/check-wiki.py, docs/wiki/.standard.toml,
+# docs/wiki/Release-Process.md, ...) are not listed, so updates reach them.
+_skip_if_exists:
+  - CHANGELOG.md
+  - .release-please-manifest.json
+  - TODO.md
+  - "cmd/**"
+  - "internal/**"
+  - "tests/**"
+  - "/*.go"
+  - "contrib/*.example.yaml"
+  - contrib/system-packages.txt
+  - docs/design/README.md
+  - docs/wiki/Home.md
+  - docs/wiki/Introduction.md
+  - docs/wiki/Quick-Start.md
+  - docs/wiki/In-Depth-Configuration.md
+  - docs/wiki/Architecture-Internals.md
+  - docs/wiki/Security.md
+  - docs/wiki/Testing-Guide.md
+  - docs/wiki/Contributing.md
+  - docs/wiki/Troubleshooting.md
+  - docs/wiki/Frequently-Asked-Questions.md
+  - docs/wiki/HTTP-API-Reference.md
+  - docs/wiki/CLI-Reference.md
+  - docs/wiki/API-Reference.md
+  - docs/wiki/Deployment.md
+  - docs/wiki/_Sidebar.md
+  - docs/wiki/_Footer.md
+
+# Tidy the module (go.sum) and fill the generated wiki sections (scripts/bootstrap.d/20-go.sh),
+# then pre-commit. Base's copy ran bootstrap.sh before this overlay's drop-ins existed, so
+# it runs again here. Needs --trust; without it, run scripts/bootstrap.sh yourself. Only on
+# copy: after an update, scripts/post-update.sh runs `go mod tidy` (template-update.yml does).
+_tasks:
+  - command: "sh scripts/bootstrap.sh"
+    when: "[[ _copier_operation == 'copy' ]]"
+
+_message_after_copy: |
+  [[ project_name ]] is a Go project.[% if container_image %] For the image's build workflows and the
+  docker/k8s manifests, add the container overlay next:
+
+    uvx copier copy --trust gh:andronics/template-container [[ _copier_conf.dst_path ]]
+  [% endif %]
+
+  Then:
+    cd [[ _copier_conf.dst_path ]]
+    git add -A && git commit -m "chore: initial commit from template-base and template-go"
+
+  Read AGENTS.md and .agents/stack.md (what your AI assistant reads too), and
+  docs/ai/prompts.md for the kick-off prompt. Wiki: docs/wiki/.
+
+_message_after_update: |
+  Next: resolve any <<<<<<< markers, run sh scripts/post-update.sh, review git diff and commit.
+
+# ------------------------------------- from base (read, never asked)
+
+# Base's answers, as this overlay's templates read them. `copier update` replays each version in
+# an empty directory, without .copier-answers.base.yml, so they're recorded in this overlay's
+# answers file (template-base decision 0001, "Overlays keep a copy of base's answers"). ask: false
+# never prompts; the validator rejects a recorded copy that differs from base's file, so Copier
+# rereads the file and the next replay gets the new one.
+base_answers:
+  type: yaml
+  ask: false
+  default: "[[ dict(_external_data.base | items | rejectattr('0', 'in', ['_commit', '_src_path'])) | tojson ]]"
+  validator: >-
+    [% if _external_data.base and base_answers != dict(_external_data.base | items
+       | rejectattr('0', 'in', ['_commit', '_src_path'])) %]stale: reread .copier-answers.base.yml[% endif %]
+
+# Base must be applied first, at v2.0.0 or later (the PR-template and issue-config slots, and this
+# base_answers pattern). Fails the copy or update with the reason otherwise. A replay has no base
+# answers file, only the recorded base_answers; the real render beside it reads the file, so the
+# check runs there.
+base_check:
+  type: str
+  when: false
+  default: >-
+    [%- set c = _external_data.base._commit | default('') | string -%]
+    [%- set v = (c | regex_search('^v?(\\d+)\\.(\\d+)\\.(\\d+)', '\\1', '\\2', '\\3')) -%]
+    [%- if not c and base_answers | default({}) -%]ok
+    [%- elif not c -%][[ {}['template-go needs template-base first: .copier-answers.base.yml is missing'].stop ]]
+    [%- elif not v or (v | map('int') | list) < [2, 0, 0] -%][[ {}['template-go needs template-base v2.0.0 or later; this project has ' ~ c].stop ]]
+    [%- else -%]ok[%- endif -%]
+
+# Base's values under the names the templates use, all from base_answers (never asked here).
+project_name:
+  type: str
+  default: "[[ base_answers.project_name ]]"
+  when: false
+
+description:
+  type: str
+  default: "[[ base_answers.description ]]"
+  when: false
+
+github_owner:
+  type: str
+  default: "[[ base_answers.github_owner ]]"
+  when: false
+
+code_owners:
+  type: str
+  default: "[[ base_answers.code_owners | default('@' ~ base_answers.github_owner ~ '/maintainers') ]]"
+  when: false
+
+license:
+  type: str
+  default: "[[ base_answers.license | default('Unlicense') ]]"
+  when: false
+
+copyright_holder:
+  type: str
+  default: "[[ base_answers.copyright_holder | default(base_answers.github_owner) ]]"
+  when: false
+
+personal_data_guard:
+  type: bool
+  default: "[[ base_answers.personal_data_guard | default(false) ]]"
+  when: false
+
+# ---------------------------------------------------------------- questions
+
+kind:
+  type: str
+  help: What it is
+  choices:
+    "service: long-running, HTTP API (net/http), health endpoints": service
+    "cli: command-line tool (cobra)": cli
+    "library: importable package only": library
+  default: service
+
+module_path:
+  type: str
+  help: Go module path (go.mod's module line)
+  default: "github.com/[[ github_owner ]]/[[ project_name ]]"
+  validator: >-
+    [% if not (module_path | regex_search('^[a-z0-9][a-z0-9-]*(\\.[a-z0-9-]+)+(/[A-Za-z0-9._~-]+)+$')) %]
+    A module path starting with a domain: github.com/owner/project
+    [% endif %]
+
+go_version:
+  type: str
+  help: Minimum Go version, not the only one. It sets go.mod's go line, the Docker builder image and the first CI matrix entry; CI also tests every newer supported version (1.26 tests 1.26 and 1.27)
+  choices: ["1.26", "1.27"]
+  default: "1.26"
+
+port:
+  type: int
+  help: HTTP port the service listens on
+  default: 8080
+  when: "[[ kind == 'service' ]]"
+
+extra_ports:
+  type: yaml
+  help: Other TCP ports the service listens on, besides `port` (for example [3128]). Each is exposed by the image and published by the contrib manifests.
+  default: "[]"
+  when: "[[ kind == 'service' ]]"
+  validator: >-
+    [% if extra_ports is string or extra_ports is not sequence %]
+    A list of port numbers: [3128]
+    [% elif extra_ports | reject('integer') | list or extra_ports | select('lt', 1) | list or extra_ports | select('gt', 65535) | list %]
+    Each port is a number from 1 to 65535
+    [% elif extra_ports | unique | list | length != extra_ports | length %]
+    A port is listed twice
+    [% elif port in extra_ports %]
+    [[ port ]] is already `port`
+    [% endif %]
+
+health_path:
+  type: str
+  help: Liveness endpoint (Docker HEALTHCHECK, k8s probes, CI smoke test)
+  default: /healthz
+  when: "[[ kind == 'service' ]]"
+  validator: "[% if not health_path.startswith('/') %]Must start with /[% endif %]"
+
+container_image:
+  type: bool
+  help: Build a container image (a Dockerfile here; template-container adds its build and publish workflows)?
+  default: "[[ kind != 'library' ]]"
+  when: "[[ kind != 'library' ]]"
+
+# The project's deployment shapes. This stack renders the systemd unit and the docs, checks
+# and release bumps for all three; template-container renders the docker and k8s manifests
+# from this answer (it never asks again). scripts/checks.d/20-go.sh fails if docker or
+# k8s is chosen and template-container isn't applied.
+contrib:
+  type: str
+  help: Deployment manifests to include under contrib/ (docker and k8s are rendered by template-container)
+  multiselect: true
+  choices:
+    "docker: compose.yml": docker
+    "k8s: kustomize base (Flux-friendly)": k8s
+    "systemd: hardened unit + sysusers": systemd
+  default: "[[ [] if kind != 'service' else ['docker', 'k8s', 'systemd'] if container_image else ['systemd'] ]]"
+  when: "[[ kind == 'service' ]]"
+  validator: >-
+    [% if not container_image and ('docker' in contrib or 'k8s' in contrib) %]
+    docker and k8s need a container image
+    [% endif %]
+
+timezone:
+  type: str
+  help: Default TZ in compose and k8s manifests
+  default: Europe/London
+  when: "[[ kind == 'service' ]]"
+
+# An opt-in CI job for the integration tests (docs/decisions/0001).
+integration_ci:
+  type: bool
+  help: Add a CI job that runs the integration tests (go test -tags integration ./tests/integration/...) with contrib/system-packages.txt's build and runtime packages? It fails if no test passes or one is skipped.
+  default: false
+
+# ------------------------------------------------- derived (never asked)
+
+has_cli:
+  type: bool
+  default: "[[ kind in ['service', 'cli'] ]]"
+  when: false
+
+# As template-container reads it: the project name in upper case, dashes as underscores.
+env_prefix:
+  type: str
+  default: "[[ project_name | replace('-', '_') | upper ]]_"
+  when: false
+
+# A library's package name: the project name without the characters Go names can't hold.
+go_package:
+  type: str
+  default: "[[ project_name | lower | replace('-', '') | replace('_', '') | replace('.', '') ]]"
+  when: false
+
+image:
+  type: str
+  default: "ghcr.io/[[ github_owner ]]/[[ project_name ]]"
+  when: false
+
+repo_url:
+  type: str
+  default: "https://github.com/[[ github_owner ]]/[[ project_name ]]"
+  when: false
+
+copyright_year:
+  type: str
+  default: "[[ '%Y' | strftime ]]"
+  when: false

@@ -1,0 +1,102 @@
+[% import 'includes/layer.jinja' as layer with context %]
+# [[ project_name ]]: multi-stage build. Template-owned skeleton; project-specific
+# stages (extra binaries, assets) go between the builder and the runtime stage.
+
+# ============================================================
+# Stage 1: builder
+# ============================================================
+# On the build machine's platform: Go cross-compiles to the target's, so a
+# multi-arch build needs no emulation.
+FROM --platform=$BUILDPLATFORM [[ layer.container_base ]] AS builder
+
+# The `build:` packages in contrib/system-packages.txt (project-owned): tools the
+# build needs (the binary itself is static: CGO_ENABLED=0). None listed: nothing runs
+# hadolint ignore=DL3008,SC2046
+RUN --mount=type=bind,source=contrib/system-packages.txt,target=/tmp/system-packages.txt \
+    set -- $(sed -n 's/^build://p' /tmp/system-packages.txt); \
+    if [ $# -gt 0 ]; then \
+        apt-get update \
+        && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@" \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+WORKDIR /build
+
+# Modules first, so a source change doesn't download them again
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+
+# Static, without local paths; only the revision is stamped (release-please writes
+# the version in the code)
+ARG TARGETOS
+ARG TARGETARCH
+ARG REVISION=unknown
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags "-s -w -X [[ module_path ]]/internal/version.Revision=${REVISION}" \
+        -o /out/[[ project_name ]] ./cmd/[[ project_name ]]
+[% if kind == 'service' %]
+
+# The runtime image has no shell to make directories: they are made here
+RUN mkdir -p /out/etc/[[ project_name ]] /out/var/lib/[[ project_name ]]
+[% endif %]
+
+# ============================================================
+# Stage 2: runtime
+# ============================================================
+# Static and distroless, by digest (Renovate moves it here): CA certificates and
+# tzdata, no shell and no package manager, so contrib/system-packages.txt's `runtime:` list can't be installed here
+FROM gcr.io/distroless/static-debian13:latest@sha256:448810357cc8e67b7208988abdba0f5ec3d3aebee0a5b13eb624979792cffc0f
+
+# Set by CI (container-build.yml) from the release; OCI labels for `docker inspect`
+ARG VERSION=0.0.0
+ARG REVISION=unknown
+ARG CREATED=unknown
+LABEL org.opencontainers.image.title="[[ project_name ]]" \
+      org.opencontainers.image.description="[[ description | replace('\\', '\\\\') | replace('"', '\\"') ]]" \
+      org.opencontainers.image.source="[[ repo_url ]]" \
+      org.opencontainers.image.documentation="[[ repo_url ]]/wiki" \
+      org.opencontainers.image.licenses="[[ 'LicenseRef-Proprietary' if license == 'Proprietary' else license ]]" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.created="${CREATED}"
+
+COPY --from=builder /out/[[ project_name ]] [[ layer.container_bin ]]
+[% if kind == 'service' %]
+
+# Config is mounted at /etc/[[ project_name ]] (missing is fine: defaults and
+# [[ env_prefix ]]* variables apply); state lives in /var/lib/[[ project_name ]]
+COPY --from=builder /out/etc/ /etc/
+COPY --from=builder --chown=1000:1000 /out/var/lib/[[ project_name ]] /var/lib/[[ project_name ]]
+COPY contrib/[[ project_name ]].example.yaml /usr/share/[[ project_name ]]/config.example.yaml
+
+# Relative paths resolve in the state directory, never in / (where an old
+# volume such as /config could be read by mistake): template-python decision 0009
+WORKDIR /var/lib/[[ project_name ]]
+
+# Bind every interface whatever the app's default: in a container, the
+# published ports decide what is reachable, and loopback would be unreachable
+ENV [[ env_prefix ]]LISTEN_HOST=0.0.0.0
+
+USER 1000:1000
+
+# `[[ project_name ]] health` loads the config as serve does and asks [[ health_path ]]
+# (template-python decision 0010)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+[% include 'includes/docker/healthcheck.Dockerfile.jinja' %]
+
+EXPOSE [[ ([port] + extra_ports) | join(' ') ]]
+VOLUME ["/var/lib/[[ project_name ]]"]
+
+ENTRYPOINT ["[[ layer.container_bin ]]"]
+CMD ["serve"]
+[% else %]
+
+USER 1000:1000
+ENTRYPOINT ["[[ layer.container_bin ]]"]
+CMD ["--help"]
+[% endif %]

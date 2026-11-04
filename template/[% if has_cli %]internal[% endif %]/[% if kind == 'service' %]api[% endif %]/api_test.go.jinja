@@ -1,0 +1,66 @@
+package api
+
+import (
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"[[ module_path ]]/internal/config"
+	"[[ module_path ]]/internal/version"
+)
+
+func get(t *testing.T, path string) (int, map[string]string) {
+	t.Helper()
+	cfg, err := config.Load("/nonexistent/config.yaml", func(string) (string, bool) { return "", false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	handler := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+	var body map[string]string
+	if rec.Code == http.StatusOK {
+		if got := rec.Header().Get("Content-Type"); got != "application/json" {
+			t.Errorf("%s: Content-Type %q", path, got)
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+	}
+	return rec.Code, body
+}
+
+func TestHealth(t *testing.T) {
+	if code, body := get(t, HealthPath); code != http.StatusOK || body["status"] != "ok" {
+		t.Errorf("%s: %d %v", HealthPath, code, body)
+	}
+}
+
+func TestReady(t *testing.T) {
+	if code, body := get(t, ReadyPath); code != http.StatusOK || body["status"] != "ready" {
+		t.Errorf("%s: %d %v", ReadyPath, code, body)
+	}
+}
+
+func TestVersion(t *testing.T) {
+	if code, body := get(t, "/version"); code != http.StatusOK || body["version"] != version.Version {
+		t.Errorf("/version: %d %v", code, body)
+	}
+}
+
+func TestUnknownPathIs404(t *testing.T) {
+	if code, _ := get(t, "/nope"); code != http.StatusNotFound {
+		t.Errorf("/nope: %d", code)
+	}
+}
+
+func TestEveryRouteHasASummary(t *testing.T) {
+	for _, r := range New(config.Config{}, slog.Default()).Routes() {
+		if r.Summary == "" || r.Method == "" || r.Handler == nil {
+			t.Errorf("%s %s: incomplete route", r.Method, r.Path)
+		}
+	}
+}

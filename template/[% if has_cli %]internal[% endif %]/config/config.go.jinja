@@ -1,0 +1,238 @@
+// Package config loads the configuration.
+//
+// Every setting can come from four places, and the first one that has it wins:
+//
+//  1. [[ env_prefix ]]<NAME>_FILE: a file that holds the value (Docker / Kubernetes secrets)
+//  2. [[ env_prefix ]]<NAME>: an environment variable
+//  3. the YAML config file ([[ env_prefix ]]CONFIG, default /etc/[[ project_name ]]/config.yaml)
+//  4. the default in Settings
+//
+// <NAME> is the dotted key in upper case, with the dots as underscores: listen.port is
+// [[ env_prefix ]]LISTEN_PORT.
+//
+// To add a setting, add it to Settings and to Config, and read it in Load. The wiki's
+// settings table is generated from Settings (scripts/gen-wiki), so write its Help as you want
+// users to read it. A Secret setting is read like any other, but `[[ project_name ]] config`
+// shows only whether it is set. Values are never logged; only where each one came from is.
+package config
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"slices"
+	"strconv"
+	"strings"
+
+	"go.yaml.in/yaml/v3"
+)
+
+// EnvPrefix starts every setting's environment variable.
+const EnvPrefix = "[[ env_prefix ]]"
+
+// ConfigEnv names the config file, when --config doesn't.
+const ConfigEnv = EnvPrefix + "CONFIG"
+
+// DefaultPath is the config file read when neither --config nor ConfigEnv names one.
+const DefaultPath = "/etc/[[ project_name ]]/config.yaml"
+
+// LogLevels are the values log_level accepts.
+var LogLevels = []string{"DEBUG", "INFO", "WARNING", "ERROR"}
+
+// Setting is one configuration key. Default's type (string, int or bool) is the setting's.
+type Setting struct {
+	Key     string
+	Default any
+	Help    string
+	Secret  bool
+}
+
+// Env is the setting's environment variable.
+func (s Setting) Env() string {
+	return EnvPrefix + strings.ToUpper(strings.ReplaceAll(s.Key, ".", "_"))
+}
+
+// Settings is every setting, in the order the wiki and `[[ project_name ]] config` list them.
+var Settings = []Setting{
+	{Key: "log_level", Default: "INFO", Help: "Log level: `DEBUG`, `INFO`, `WARNING` or `ERROR`."},
+[% if kind == 'service' %]
+	{Key: "listen.host", Default: "0.0.0.0", Help: "Address the HTTP server binds to."},
+	{Key: "listen.port", Default: [[ port ]], Help: "Port the HTTP server listens on."},
+	{Key: "state_dir", Default: "/var/lib/[[ project_name ]]", Help: "Directory for persistent state."},
+[% endif %]
+}
+
+// Config is the loaded configuration.
+type Config struct {
+	LogLevel string
+[% if kind == 'service' %]
+	Host     string
+	Port     int
+	StateDir string
+[% endif %]
+	// Values holds every setting's value by key, for `[[ project_name ]] config`.
+	Values map[string]any
+	// Sources says where each setting's value came from: "default", "file" or a variable's name.
+	Sources map[string]string
+}
+
+// Error is a configuration that can't be read, or a value in it that is invalid.
+type Error struct{ msg string }
+
+func (e *Error) Error() string { return e.msg }
+
+func errorf(format string, args ...any) *Error {
+	return &Error{msg: fmt.Sprintf(format, args...)}
+}
+
+// LookupFunc reads an environment variable, as os.LookupEnv does.
+type LookupFunc func(name string) (string, bool)
+
+// Load reads the configuration. path is the config file (empty: ConfigEnv, then DefaultPath);
+// a missing file is not an error, and defaults apply. lookup reads the environment
+// (os.LookupEnv; tests pass their own).
+func Load(path string, lookup LookupFunc) (Config, error) {
+	if path == "" {
+		path = DefaultPath
+		if p, ok := lookup(ConfigEnv); ok && p != "" {
+			path = p
+		}
+	}
+	data, err := readFile(path)
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg := Config{Values: map[string]any{}, Sources: map[string]string{}}
+	for _, s := range Settings {
+		value, source, err := resolve(s, data, lookup)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.Values[s.Key], cfg.Sources[s.Key] = value, source
+	}
+
+	// Rules on one value, then across values, go here.
+	cfg.LogLevel = strings.ToUpper(cfg.Values["log_level"].(string))
+	if !slices.Contains(LogLevels, cfg.LogLevel) {
+		return Config{}, errorf("log_level: expected one of %s, got %q", strings.Join(LogLevels, ", "), cfg.LogLevel)
+	}
+	cfg.Values["log_level"] = cfg.LogLevel
+[% if kind == 'service' %]
+	cfg.Host = cfg.Values["listen.host"].(string)
+	cfg.Port = cfg.Values["listen.port"].(int)
+	if cfg.Port < 1 || cfg.Port > 65535 {
+		return Config{}, errorf("listen.port: %d is not a TCP port", cfg.Port)
+	}
+	cfg.StateDir = cfg.Values["state_dir"].(string)
+[% endif %]
+	return cfg, nil
+}
+
+// resolve gives the setting's value and where it came from.
+func resolve(s Setting, data map[string]any, lookup LookupFunc) (any, string, error) {
+	name := s.Env()
+	fileVar := name + "_FILE"
+	if file, ok := lookup(fileVar); ok {
+		raw, err := os.ReadFile(file) //nolint:gosec // G304: reading the file the operator named is the point
+		if err != nil {
+			return nil, "", errorf("cannot read %s (%s): %v", fileVar, file, err)
+		}
+		v, err := coerce(s, strings.TrimSpace(string(raw)))
+		return v, fileVar, err
+	}
+	if raw, ok := lookup(name); ok {
+		v, err := coerce(s, raw)
+		return v, name, err
+	}
+	if raw, ok := lookupKey(data, s.Key); ok && raw != nil {
+		v, err := coerce(s, raw)
+		return v, "file", err
+	}
+	return s.Default, "default", nil
+}
+
+// lookupKey finds a dotted key in the config file's nested mappings.
+func lookupKey(data map[string]any, dotted string) (any, bool) {
+	var node any = data
+	for part := range strings.SplitSeq(dotted, ".") {
+		m, ok := node.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		if node, ok = m[part]; !ok {
+			return nil, false
+		}
+	}
+	return node, true
+}
+
+// coerce gives raw (a string from the environment or a file, or a YAML value) the default's type.
+func coerce(s Setting, raw any) (any, error) {
+	switch s.Default.(type) {
+	case bool:
+		switch v := raw.(type) {
+		case bool:
+			return v, nil
+		case string:
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "1", "true", "yes", "on":
+				return true, nil
+			case "0", "false", "no", "off":
+				return false, nil
+			}
+		}
+		return nil, errorf("%s: expected boolean, got %s", s.Key, show(raw))
+	case int:
+		switch v := raw.(type) {
+		case int:
+			return v, nil
+		case string:
+			if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+				return n, nil
+			}
+		}
+		return nil, errorf("%s: expected integer, got %s", s.Key, show(raw))
+	default:
+		switch v := raw.(type) {
+		case string:
+			return v, nil
+		case int, float64, bool:
+			// A YAML scalar such as 8080 or 2.5 is fine as a string.
+			return fmt.Sprint(v), nil
+		}
+		return nil, errorf("%s: expected string, got %s", s.Key, show(raw))
+	}
+}
+
+// show quotes a string and prints anything else as Go does, for an error message.
+func show(raw any) string {
+	if v, ok := raw.(string); ok {
+		return strconv.Quote(v)
+	}
+	return fmt.Sprint(raw)
+}
+
+// readFile reads the YAML config file: a missing one is empty.
+func readFile(path string) (map[string]any, error) {
+	text, err := os.ReadFile(path) //nolint:gosec // G304: reading the file the operator named is the point
+	if errors.Is(err, fs.ErrNotExist) {
+		return map[string]any{}, nil
+	}
+	if err != nil {
+		return nil, errorf("cannot read %s: %v", path, err)
+	}
+	var loaded any
+	if err := yaml.Unmarshal(text, &loaded); err != nil {
+		return nil, errorf("cannot read %s: %v", path, err)
+	}
+	if loaded == nil {
+		return map[string]any{}, nil
+	}
+	data, ok := loaded.(map[string]any)
+	if !ok {
+		return nil, errorf("%s: the top level must be a mapping", path)
+	}
+	return data, nil
+}

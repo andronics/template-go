@@ -1,0 +1,10 @@
+[% if has_cli %]
+| `internal/version/` | The version (release-please writes it) and the build's revision |
+| `internal/config/` | Settings and their precedence (`_FILE` > env > file > default) |
+| `internal/cli/` | The `[[ project_name ]]` command (cobra); `cmd/[[ project_name ]]/` calls it |
+[% else %]
+| `version.go`, `doc.go` | The package at the module root: its version and documentation |
+[% endif %]
+[% if kind == 'service' %]
+| `internal/api/` | The HTTP API (`net/http`): health, readiness, version |
+[% endif %]

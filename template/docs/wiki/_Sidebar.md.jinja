@@ -1,0 +1,64 @@
+## [[ project_name ]]
+
+[GitHub]([[ repo_url ]]) • [Releases]([[ repo_url ]]/releases)
+
+---
+
+### 📚 Getting Started
+
+- [Home](Home)
+- [Introduction](Introduction)
+- [Quick Start](Quick-Start)
+
+### 📖 Core Concepts
+
+<!-- Project pages go here, e.g. - [How Matching Works](How-Matching-Works) -->
+[% if kind == 'service' %]
+- [HTTP API Reference](HTTP-API-Reference)
+[% endif %]
+[% if kind == 'library' %]
+- [API Reference](API-Reference)
+[% endif %]
+[% if has_cli %]
+- [CLI Reference](CLI-Reference)
+[% endif %]
+[% if has_cli %]
+
+### 🔧 Configuration
+
+- [In-Depth Configuration](In-Depth-Configuration)
+[% endif %]
+[% if contrib or kind == 'service' %]
+- [Deployment](Deployment)
+[% endif %]
+
+### 🔒 Security
+
+- [Security](Security)
+
+### 🆘 Help & Support
+
+- [FAQ](Frequently-Asked-Questions)
+- [Troubleshooting](Troubleshooting)
+
+### 🧑‍💻 For Developers
+
+- [Contributing](Contributing)
+- [Architecture Internals](Architecture-Internals)
+- [Testing Guide](Testing-Guide)
+- [Release Process](Release-Process)
+
+---
+
+### 🔑 Key Features
+
+<!-- guidance: three to five one-line features, each starting with an emoji. -->
+[% if container_image %]
+
+---
+
+### 🔗 Quick Links
+
+- [Container image]([[ repo_url ]]/pkgs/container/[[ project_name ]])
+- [Report an issue]([[ repo_url ]]/issues)
+[% endif %]

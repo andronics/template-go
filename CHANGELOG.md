@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.4](https://github.com/andronics/template-go/compare/v1.0.3...v1.0.4) (2026-11-04)
+
+
+### 🐛 Bug Fixes
+
+* **copier:** descriptions with any Unicode and any length scaffold cleanly ([#10](https://github.com/andronics/template-go/issues/10)) ([a5323c3](https://github.com/andronics/template-go/commit/a5323c31b0cc1a04686fb7b17b2268f0e8bcec5a))
+
 ## [1.0.3](https://github.com/andronics/template-go/compare/v1.0.2...v1.0.3) (2026-11-04)
 
 

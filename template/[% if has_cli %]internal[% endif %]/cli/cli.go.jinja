@@ -83,7 +83,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 func New(stdout, stderr io.Writer) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "[[ project_name ]]",
-		Short:         [[ description | replace('\n', ' ') | tojson ]],
+		Short:         [[ description | replace('\n', ' ') | to_json(ensure_ascii=False) ]],
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}

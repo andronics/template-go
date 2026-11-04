@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/andronics/template-go/compare/v1.0.2...v1.0.3) (2026-11-04)
+
+
+### 🐛 Bug Fixes
+
+* **release:** don't parse an empty release-please output ([#9](https://github.com/andronics/template-go/issues/9)) ([b80de63](https://github.com/andronics/template-go/commit/b80de63d53442651c88c659ffaf57180f96d4508))
+
 ## [1.0.2](https://github.com/andronics/template-go/compare/v1.0.1...v1.0.2) (2026-11-04)
 
 

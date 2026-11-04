@@ -68,7 +68,8 @@ DOD = [
     ("go", "mod", "tidy", "-diff"),
     ("go", "mod", "verify"),
     ("golangci-lint", "fmt", "--diff"),
-    ("golangci-lint", "run"),
+    # Several renders lint at once here (xdist): golangci-lint's lock would turn them away.
+    ("golangci-lint", "run", "--allow-parallel-runners"),
     ("go", "vet", "./..."),
     ("sh", "scripts/test.sh"),
     ("go", "run", "./scripts/gen-wiki", "--check"),

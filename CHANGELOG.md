@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/andronics/template-go/compare/v1.0.0...v1.0.1) (2026-11-04)
+
+
+### 📚 Documentation
+
+* **decisions:** say Approved, not Accepted ([#4](https://github.com/andronics/template-go/issues/4)) ([50f7b8d](https://github.com/andronics/template-go/commit/50f7b8d4377724671c2124088d145e4443c93e1d))
+
 ## 1.0.0 (2026-11-04)
 
 

@@ -1,0 +1,79 @@
+# Stack: Go
+
+Go >= [[ go_version ]] with Go modules: `go` fetches go.mod's toolchain itself (`GOTOOLCHAIN=auto`). Done = code + tests + wiki.
+
+- **Design records:** `docs/design/NNNN-*.md` from `0000-template.md`, a line in its `README.md` index (read only what it names). New feature, dependency or public interface (config keys, CLI, HTTP API, file formats): write one first.
+- Never re-propose `TODO.md`'s "Decided against".
+
+## Don't read
+
+`go.sum` (use `go list -m all`), `CHANGELOG.md` (use `git log`), `coverage.out`, `dist/`; generated wiki blocks (`<!-- generated:start/end -->`).
+
+## Commands
+
+| Task | Command |
+|---|---|
+| Install / add | `go mod download` / `go get <module>`, then `go mod tidy` |
+| Lint, format | `golangci-lint run --fix`, `golangci-lint fmt` |
+| Vet | `go vet ./...` |
+| Tests (80% floor, -race) / integration | `sh scripts/test.sh` / `go test -tags integration ./tests/integration/...` |
+| Wiki sections | `go run ./scripts/gen-wiki` |
+[% if has_cli %]
+| Run | `go run ./cmd/[[ project_name ]] --help` |
+[% endif %]
+
+## Repository map
+
+| Path | What |
+|---|---|
+[% if has_cli %]
+| `cmd/[[ project_name ]]/`, `internal/` | `main.go` calls `internal/cli` (cobra); `config`, `version`[% if kind == 'service' %], `api` (`net/http`)[% endif %] |
+[% else %]
+| `*.go` at the root | The package `[[ go_package ]]`; `version.go` holds the version |
+[% endif %]
+| `*_test.go`, `tests/integration/` | Unit tests beside the code; integration behind the `integration` build tag |
+| `docs/wiki/`, `docs/design/` | The wiki (`.standard.toml`, T); design records |
+| `docs/ai/` | Prompts, review checklist (T) |
+| `contrib/` | `system-packages.txt` (apt `build:`/`runtime:`)[% if contrib %]; [[ contrib | join(', ') ]][% endif %] |
+[% if container_image %]
+| `Dockerfile` | Image (T skeleton) |
+[% endif %]
+[% if has_cli %]
+| `.goreleaser.yaml` | Release binaries (T) |
+[% endif %]
+| `CHANGELOG.md`, `Version` in `[% if has_cli %]internal/version/[% endif %]version.go`, `.release-please-manifest.json` | release-please only |
+
+## Conventions
+
+- **Style:** golangci-lint (`.golangci.yml`, T). A `//nolint` names its linter and states its reason. Comments say *why*. No `fmt.Print` outside the CLI: `log/slog`.
+[% if has_cli %]
+- **Config:** every setting through `config.Settings`: `[[ env_prefix ]]<KEY>_FILE` > `[[ env_prefix ]]<KEY>` > file > default. Secrets: `Secret: true`, from `_FILE`, never logged.
+- **Errors:** wrap with `%w`; the CLI prints one line and exits 2 on a config error. No `panic` for an expected failure.
+[% endif %]
+- **Dependencies:** only when the standard library or an existing one can't; justify it, and check the module exists. No cgo: binaries are `CGO_ENABLED=0`.
+- **Tests:** each behaviour change gets a test that fails without it; no network in unit tests.
+- **Never:** edit `CHANGELOG.md`, the version or generated wiki blocks; lower the coverage floor or skip a test; add `no-docs-needed` (reviewers only), telemetry or network calls in `init`.
+
+## Definition of done
+
+`sh scripts/checks.sh` (wiki standard, version), then `go mod tidy -diff`, `golangci-lint fmt --diff && golangci-lint run`, `go vet ./...`, `sh scripts/test.sh`, `go run ./scripts/gen-wiki --check`[% if has_cli %], `goreleaser check`[% endif %][% if container_image or contrib %], `scripts/check-manifests.sh`[% endif %]; with Docker, `scripts/check-markdown.sh`. And your change's docs-map pages.
+
+## Docs map
+
+| You changed | Update |
+|---|---|
+[% if has_cli %]
+| a setting, a command | In-Depth-Configuration, CLI-Reference (regenerate) |
+[% endif %]
+[% if kind == 'service' %]
+| a route | HTTP-API-Reference (regenerate, then document) |
+[% endif %]
+[% if kind == 'library' %]
+| the public API | API-Reference (regenerate, then document) |
+[% endif %]
+[% if contrib %]
+| `Dockerfile`, `contrib/**` | Deployment |
+[% endif %]
+| components; security; a failure mode; tests | Architecture-Internals (+ a record); Security; Troubleshooting; Testing-Guide |
+
+Wiki links use page names (`[Quick Start](Quick-Start)`); link new pages from `_Sidebar.md`.

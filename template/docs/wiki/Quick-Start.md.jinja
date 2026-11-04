@@ -1,0 +1,63 @@
+[% import 'includes/layer.jinja' as layer with context %]
+# Quick Start
+
+From nothing to a working [[ project_name ]] in a few minutes. Everything else is in [% if has_cli %][In-Depth Configuration](In-Depth-Configuration)[% else %][API Reference](API-Reference)[% endif %][% if contrib %] and [Deployment](Deployment)[% endif %].
+
+## Prerequisites
+
+[% if kind == 'service' and container_image %]
+- Docker (or any OCI runtime)
+[% endif %]
+[% include 'includes/wiki/prerequisites.md.jinja' %]
+<!-- guidance: add what it talks to: accounts, API keys, other services. -->
+
+## Install
+
+[% if kind == 'service' and container_image %]
+```sh
+docker pull [[ image ]]:latest
+```
+
+[% endif %]
+[% if has_cli %]
+```sh
+[[ layer.install_cli ]]
+```
+[% else %]
+```sh
+[[ layer.install_lib ]]
+```
+[% endif %]
+
+## First run
+
+[% if kind == 'service' and container_image %]
+```sh
+docker run -d --name [[ project_name ]] -p 127.0.0.1:[[ port ]]:[[ port ]] [[ image ]]:latest
+curl http://127.0.0.1:[[ port ]][[ health_path ]]      # {"status":"ok"}
+docker exec [[ project_name ]] [[ project_name ]] config   # the effective configuration
+```
+[% elif has_cli %]
+```sh
+[[ project_name ]] --help
+[[ project_name ]] config      # the effective configuration, and where each value came from
+```
+[% else %]
+```[[ layer.code_lang ]]
+[[ layer.import_snippet ]]
+```
+[% endif %]
+
+<!-- guidance: extend this into the first real task a user does, with the expected output. -->
+
+## Next steps
+
+[% if has_cli %]
+- [In-Depth Configuration](In-Depth-Configuration): every setting
+[% else %]
+- [API Reference](API-Reference): the public API
+[% endif %]
+[% if contrib %]
+- [Deployment](Deployment): [[ contrib | join(', ') ]]
+[% endif %]
+- [Troubleshooting](Troubleshooting) if something doesn't work

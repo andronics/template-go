@@ -1,0 +1,15 @@
+```sh
+sh scripts/test.sh                                         # unit tests, -race, with an 80% coverage floor
+[% if has_cli %]
+go test ./internal/config -run Env                         # a subset, no coverage floor
+[% else %]
+go test -run Version .                                     # a subset, no coverage floor
+[% endif %]
+go test -tags integration ./tests/integration/...          # integration tests (real external systems)
+```
+
+CI runs the unit tests on every supported Go version, together with golangci-lint, go vet, `go mod tidy -diff`, the wiki checks and the manifest checks. All of them block a merge.
+[% if integration_ci %]
+
+The **Integration tests** job runs the integration tests too, with every package in `contrib/system-packages.txt`. It fails if no test passes or one is skipped, so a missing package or device fails it rather than passing it.
+[% endif %]

@@ -1,0 +1,15 @@
+// Command [[ project_name ]]: [[ description | replace('\n', ' ') ]]
+//
+// Everything lives in internal/cli, so the command line can be tested and documented
+// (scripts/gen-wiki) without running it.
+package main
+
+import (
+	"os"
+
+	"[[ module_path ]]/internal/cli"
+)
+
+func main() {
+	os.Exit(cli.Main(os.Args[1:], os.Stdout, os.Stderr))
+}

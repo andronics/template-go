@@ -1,0 +1,34 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["local>andronics/template-base//renovate/templates.json5"],
+  "customManagers": [
+    {
+      "description": "golangci-lint: the action's `version:` input (an action input the preset skips), and the pre-commit hook's `rev`, which must stay CI's version",
+      "customType": "regex",
+      "managerFilePatterns": ["template/**", "includes/**", ".github/workflows/**"],
+      "matchStrings": [
+        "uses: golangci/golangci-lint-action@\\S+.*\\n\\s+with:\\n\\s+version: (?<currentValue>v\\d+\\.\\d+\\.\\d+)\\b",
+        "repo: https://github\\.com/golangci/golangci-lint\\n\\s+rev: (?<currentValue>v\\d+\\.\\d+\\.\\d+)\\b"
+      ],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "description": "GoReleaser: the action's `version:` input (an action input the preset skips)",
+      "customType": "regex",
+      "managerFilePatterns": ["template/**", "includes/**", ".github/workflows/**"],
+      "matchStrings": [
+        "uses: goreleaser/goreleaser-action@\\S+.*\\n(?:\\s+if: .*\\n)?\\s+with:\\n\\s+version: (?<currentValue>v\\d+\\.\\d+\\.\\d+)\\b"
+      ],
+      "depNameTemplate": "goreleaser/goreleaser",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "description": "The skeleton's Go modules: the require lines in template/go.mod.jinja (projects' own go.mod is their Dependabot's)",
+      "customType": "regex",
+      "managerFilePatterns": ["template/go.mod.jinja"],
+      "matchStrings": ["(?:require |\\t)(?<depName>[a-z0-9.-]+\\.[a-z]+/\\S+) (?<currentValue>v\\d+\\.\\d+\\.\\d+)\\b"],
+      "datasourceTemplate": "go"
+    }
+  ]
+}

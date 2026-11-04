@@ -1,0 +1,23 @@
+[% import 'includes/layer.jinja' as layer with context %]
+# Testing Guide
+
+## Running the tests
+
+[% include 'includes/wiki/testing-run.md.jinja' %]
+
+## Test layout
+
+| Path | What goes there |
+|---|---|
+[% include 'includes/wiki/testing-layout.md.jinja' %]
+
+<!-- guidance: add fixtures, test data directories and fakes as they appear. -->
+
+## Writing tests
+
+- Every behaviour change needs a test that fails without it. A bug fix starts with the failing test.
+- Assert outcomes (outputs, side effects, errors), not internal calls.
+- Use placeholders for anything that looks real: `example.org`, `192.0.2.0/24`, fake tokens.
+- Don't lower the coverage floor or skip a test to make CI pass.
+
+<!-- guidance: project-specific patterns: how to fake the upstream API, time, the filesystem. -->

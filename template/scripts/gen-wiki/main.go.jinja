@@ -1,0 +1,264 @@
+// Command gen-wiki regenerates the generated sections of docs/wiki/ from the code.
+// Template-owned: template-go.
+//
+//	go run ./scripts/gen-wiki           # rewrite the sections
+//	go run ./scripts/gen-wiki --check   # CI: fail if any of them is stale
+//
+// A generated section sits between markers, and everything between them is replaced:
+//
+//	<!-- generated:start settings -->
+//	...
+//	<!-- generated:end settings -->
+//
+[% if kind == 'service' %]
+// Blocks: settings (config.Settings), cli (the cobra tree), http-api (api.Routes).
+[% elif has_cli %]
+// Blocks: settings (config.Settings), cli (the cobra tree).
+[% else %]
+// Blocks: api (go doc -all of the package at the module root, its version masked).
+[% endif %]
+// Write prose around the markers, never inside them.
+package main
+
+import (
+[% if not has_cli %]
+	"context"
+[% endif %]
+	"flag"
+	"fmt"
+	"io"
+	"os"
+[% if not has_cli %]
+	"os/exec"
+[% endif %]
+	"path/filepath"
+	"regexp"
+[% if has_cli %]
+	"slices"
+[% endif %]
+	"strings"
+[% if has_cli %]
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+
+[% endif %]
+[% if kind == 'service' %]
+	"[[ module_path ]]/internal/api"
+[% endif %]
+[% if has_cli %]
+	"[[ module_path ]]/internal/cli"
+	"[[ module_path ]]/internal/config"
+[% endif %]
+)
+
+const wiki = "docs/wiki"
+
+var marker = regexp.MustCompile(`(?s)<!--\s*generated:start\s+(\S+)\s*-->.*?<!--\s*generated:end\s+(\S+)\s*-->`)
+
+func main() {
+	check := flag.Bool("check", false, "fail if a section is stale")
+	flag.Parse()
+	os.Exit(run(*check, os.Stdout))
+}
+
+func run(check bool, out io.Writer) int {
+	pages, err := filepath.Glob(filepath.Join(wiki, "*.md"))
+	if err != nil {
+		return fail(out, err)
+	}
+	var stale []string
+	for _, page := range pages {
+		text, err := os.ReadFile(page) //nolint:gosec // G304: the wiki's own pages
+		if err != nil {
+			return fail(out, err)
+		}
+		updated, err := render(string(text))
+		if err != nil {
+			return fail(out, fmt.Errorf("%s: %w", page, err))
+		}
+		if updated == string(text) {
+			continue
+		}
+		stale = append(stale, page)
+		if !check {
+			if err := os.WriteFile(page, []byte(updated), 0o644); err != nil { //nolint:gosec // G306: a tracked file
+				return fail(out, err)
+			}
+		}
+	}
+	if check && len(stale) > 0 {
+		for _, page := range stale {
+			_, _ = fmt.Fprintf(out, "error: %s: generated section is stale\n", page)
+		}
+		_, _ = fmt.Fprintln(out, "Run `go run ./scripts/gen-wiki` and commit the result.")
+		return 1
+	}
+	verb := "updated: "
+	if check {
+		verb = "stale: "
+	}
+	if len(stale) == 0 {
+		stale = []string{"none"}
+	}
+	_, _ = fmt.Fprintln(out, verb+strings.Join(stale, ", "))
+	return 0
+}
+
+func fail(out io.Writer, err error) int {
+	_, _ = fmt.Fprintf(out, "error: %v\n", err)
+	return 1
+}
+
+// render replaces every generated block in text.
+func render(text string) (string, error) {
+	var failed error
+	result := marker.ReplaceAllStringFunc(text, func(m string) string {
+		groups := marker.FindStringSubmatch(m)
+		name := groups[1]
+		if groups[2] != name {
+			failed = fmt.Errorf("generated:start %s ends with generated:end %s", name, groups[2])
+			return m
+		}
+		block, ok := blocks[name]
+		if !ok {
+			failed = fmt.Errorf("unknown generated block %q", name)
+			return m
+		}
+		body, err := block()
+		if err != nil {
+			failed = fmt.Errorf("block %s: %w", name, err)
+			return m
+		}
+		return "<!-- generated:start " + name + " -->\n" + body + "\n<!-- generated:end " + name + " -->"
+	})
+	return result, failed
+}
+
+var blocks = map[string]func() (string, error){
+[% if has_cli %]
+	"settings": settings,
+	"cli":      commands,
+[% if kind == 'service' %]
+	"http-api": httpAPI,
+[% endif %]
+[% else %]
+	"api": packageDoc,
+[% endif %]
+}
+[% if has_cli %]
+
+func cell(text string) string {
+	return strings.NewReplacer("|", `\|`, "\n", " ").Replace(text)
+}
+
+func settings() (string, error) {
+	rows := []string{
+		"| Key | Environment variable | Default | Description |",
+		"|---|---|---|---|",
+	}
+	for _, s := range config.Settings {
+		def := fmt.Sprintf("`%v`", s.Default)
+		if s.Default == "" {
+			def = "*(none)*"
+		}
+		locked := ""
+		if s.Secret {
+			locked = " 🔒 Secret: use the `_FILE` variant."
+		}
+		rows = append(rows, fmt.Sprintf("| `%s` | `%s` | %s | %s%s |", s.Key, s.Env(), def, cell(s.Help), locked))
+	}
+	return strings.Join(rows, "\n"), nil
+}
+
+func commands() (string, error) {
+	var out []string
+	for _, cmd := range leaves(cli.New(io.Discard, io.Discard)) {
+		out = append(out, "### `"+cmd.CommandPath()+"`", "")
+		help := cmd.Long
+		if help == "" {
+			help = cmd.Short
+		}
+		out = append(out, strings.TrimSpace(help), "")
+		var flags []*pflag.Flag
+		cmd.NonInheritedFlags().VisitAll(func(f *pflag.Flag) {
+			if f.Name != "help" && !f.Hidden {
+				flags = append(flags, f)
+			}
+		})
+		if len(flags) == 0 {
+			continue
+		}
+		out = append(out, "| Option | Environment variable | Description |", "|---|---|---|")
+		for _, f := range flags {
+			names := "`--" + f.Name + "`"
+			if f.Shorthand != "" {
+				names = "`-" + f.Shorthand + "`, " + names
+			}
+			env := ""
+			if vars := f.Annotations[cli.EnvAnnotation]; len(vars) > 0 {
+				env = "`" + strings.Join(vars, "`, `") + "`"
+			}
+			usage := f.Usage
+			if f.DefValue != "" && f.DefValue != "false" && f.Value.Type() != "string" {
+				usage += " Default: `" + f.DefValue + "`."
+			}
+			out = append(out, fmt.Sprintf("| %s | %s | %s |", names, env, cell(usage)))
+		}
+		out = append(out, "")
+	}
+	return strings.TrimRight(strings.Join(out, "\n"), "\n"), nil
+}
+
+// leaves is every runnable command under root, sorted by name, nested commands included.
+func leaves(root *cobra.Command) []*cobra.Command {
+	var found []*cobra.Command
+	children := root.Commands()
+	slices.SortFunc(children, func(a, b *cobra.Command) int { return strings.Compare(a.Name(), b.Name()) })
+	for _, c := range children {
+		if !c.IsAvailableCommand() {
+			continue
+		}
+		if c.Runnable() {
+			found = append(found, c)
+		}
+		found = append(found, leaves(c)...)
+	}
+	return found
+}
+[% endif %]
+[% if kind == 'service' %]
+
+func httpAPI() (string, error) {
+	cfg, err := config.Load("/nonexistent/config.yaml", func(string) (string, bool) { return "", false })
+	if err != nil {
+		return "", err
+	}
+	routes := api.New(cfg, nil).Routes()
+	slices.SortStableFunc(routes, func(a, b api.Route) int {
+		if c := strings.Compare(a.Path, b.Path); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Method, b.Method)
+	})
+	rows := []string{"| Method | Path | Summary |", "|---|---|---|"}
+	for _, r := range routes {
+		rows = append(rows, fmt.Sprintf("| `%s` | `%s` | %s |", r.Method, r.Path, cell(r.Summary)))
+	}
+	return strings.Join(rows, "\n"), nil
+}
+[% endif %]
+[% if not has_cli %]
+
+// version is release-please's line: masked, so a Release PR leaves the block unchanged.
+var version = regexp.MustCompile(`(const Version = )"[^"]*"`)
+
+func packageDoc() (string, error) {
+	doc, err := exec.CommandContext(context.Background(), "go", "doc", "-all", ".").Output()
+	if err != nil {
+		return "", fmt.Errorf("go doc -all .: %w", err)
+	}
+	text := version.ReplaceAllString(strings.TrimSpace(string(doc)), `$1"X.Y.Z"`)
+	return "```text\n" + text + "\n```", nil
+}
+[% endif %]

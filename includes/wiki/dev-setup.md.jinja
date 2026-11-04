@@ -1,0 +1,6 @@
+```sh
+git clone [[ repo_url ]] && cd [[ project_name ]]
+go mod download                          # Go >= [[ go_version ]]: go fetches it if needed (GOTOOLCHAIN=auto)
+uv tool install pre-commit && pre-commit install -t pre-commit -t commit-msg
+sh scripts/test.sh                       # all green before you start
+```

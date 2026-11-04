@@ -1,0 +1,33 @@
+# Troubleshooting
+
+## Diagnostics
+
+[% if has_cli %]
+- **Effective configuration:** `[[ project_name ]] config` prints every setting and where it came from (default, file, env var). A secret shows only whether it is set (`******** (set)` or `(unset)`), never its value.
+- **More logging:** `[[ env_prefix ]]LOG_LEVEL=DEBUG`.
+[% endif %]
+[% if kind == 'service' %]
+- **Health:** `curl http://127.0.0.1:[[ port ]][[ health_path ]]` (alive) and `/readyz` (ready to serve).
+[% endif %]
+[% if container_image %]
+- **Container:** `docker logs [[ project_name ]]`, and `docker inspect --format '{{json .State.Health}}' [[ project_name ]]`.
+[% endif %]
+[% if 'k8s' in contrib %]
+- **Kubernetes:** `kubectl -n [[ project_name ]] logs deploy/[[ project_name ]]` and `kubectl -n [[ project_name ]] describe pod`.
+[% endif %]
+[% if 'systemd' in contrib %]
+- **systemd:** `journalctl -u [[ project_name ]] -e` and `systemctl status [[ project_name ]]`.
+[% endif %]
+[% if not (has_cli or container_image or contrib) %]
+<!-- guidance: how a user sees what the library is doing: its logger names, and any debug switches. -->
+[% endif %]
+
+## Common problems
+
+<!-- guidance: one ### heading per symptom, in the user's words ("Exits with 'cannot read ..._FILE'"), then the cause and the fix. Add one whenever a bug report or a support question shows a new failure mode. -->
+[% if has_cli %]
+
+### `error: cannot read [[ env_prefix ]]..._FILE`
+
+The file named by a `_FILE` variable doesn't exist, or the process can't read it. Check the path inside the container or unit, and the file's owner and mode: the process runs as uid 1000 / the `[[ project_name ]]` user.
+[% endif %]

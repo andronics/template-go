@@ -1,0 +1,5 @@
+- `golangci-lint fmt` (gofmt, goimports) and `golangci-lint run` decide formatting and lint. Don't argue with them in review.
+- Comments explain *why*. Logging goes through `log/slog`; only the CLI prints.
+[% if has_cli %]
+- Settings go through `config.Settings`. Secrets come from `_FILE`, and are never logged.
+[% endif %]

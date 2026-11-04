@@ -1,0 +1,197 @@
+package cli
+
+import (
+	"bytes"
+[% if kind == 'service' %]
+	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
+[% endif %]
+	"os"
+	"path/filepath"
+[% if kind == 'service' %]
+	"strconv"
+[% endif %]
+	"strings"
+	"testing"
+[% if kind == 'service' %]
+	"time"
+[% endif %]
+
+	"[[ module_path ]]/internal/config"
+	"[[ module_path ]]/internal/version"
+)
+
+// run runs the command line with a clean environment: no [[ env_prefix ]]* variable leaks in,
+// and the default config file is one that doesn't exist.
+func run(t *testing.T, args ...string) (int, string, string) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, config.EnvPrefix) {
+			t.Setenv(name, "")
+			_ = os.Unsetenv(name)
+		}
+	}
+	t.Setenv(config.ConfigEnv, filepath.Join(t.TempDir(), "missing.yaml"))
+	var stdout, stderr bytes.Buffer
+	code := Main(args, &stdout, &stderr)
+	return code, stdout.String(), stderr.String()
+}
+
+func TestVersion(t *testing.T) {
+	code, out, _ := run(t, "version")
+	if code != 0 || strings.TrimSpace(out) != version.Version {
+		t.Errorf("version: %d %q", code, out)
+	}
+}
+
+func TestHelp(t *testing.T) {
+	code, out, _ := run(t, "--help")
+	if code != 0 || !strings.Contains(out, "version") || !strings.Contains(out, "config") {
+		t.Errorf("--help: %d %q", code, out)
+	}
+}
+
+func TestConfigShowsEverySettingAndItsSource(t *testing.T) {
+	code, out, _ := run(t, "config")
+	if code != 0 {
+		t.Fatalf("config: exit %d", code)
+	}
+	for _, s := range config.Settings {
+		if !strings.Contains(out, s.Key+" = ") {
+			t.Errorf("config doesn't show %s:\n%s", s.Key, out)
+		}
+	}
+	if !strings.Contains(out, "log_level = INFO  (default)") {
+		t.Errorf("config:\n%s", out)
+	}
+}
+
+func TestConfigFlagAndEnv(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("log_level: ERROR\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, out, _ := run(t, "config", "--config", path); !strings.Contains(out, "log_level = ERROR  (file)") {
+		t.Errorf("--config:\n%s", out)
+	}
+	t.Setenv(config.EnvPrefix+"LOG_LEVEL", "debug")
+	var stdout bytes.Buffer
+	if code := Main([]string{"config", "-c", path}, &stdout, &bytes.Buffer{}); code != 0 ||
+		!strings.Contains(stdout.String(), "log_level = DEBUG  ("+config.EnvPrefix+"LOG_LEVEL)") {
+		t.Errorf("env over file: %d\n%s", code, stdout.String())
+	}
+}
+
+func TestABadConfigExits2(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("log_level: LOUD\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut := run(t, "config", "-c", path)
+	if code != 2 || !strings.HasPrefix(errOut, "error: log_level:") {
+		t.Errorf("bad config: %d %q", code, errOut)
+	}
+}
+
+func TestBadUsageExits2(t *testing.T) {
+	for _, args := range [][]string{{"nope"}, {"version", "extra"}, {"config", "--nope"}} {
+		if code, _, errOut := run(t, args...); code != 2 || !strings.HasPrefix(errOut, "error: ") {
+			t.Errorf("%v: %d %q", args, code, errOut)
+		}
+	}
+}
+[% if kind == 'service' %]
+
+// listen gives the address of a server answering status on every path, as a config.
+func listen(t *testing.T, status int) config.Config {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
+	t.Cleanup(server.Close)
+	host, port, _ := net.SplitHostPort(server.Listener.Addr().String())
+	n, _ := strconv.Atoi(port)
+	return config.Config{Host: host, Port: n}
+}
+
+// freePort is a TCP port nothing listens on.
+func freePort(t *testing.T) int {
+	t.Helper()
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	_ = l.Close()
+	return port
+}
+
+func TestCheck(t *testing.T) {
+	ctx := context.Background()
+	if err := Check(ctx, listen(t, http.StatusOK), "/healthz", time.Second); err != nil {
+		t.Errorf("200: %v", err)
+	}
+	if err := Check(ctx, listen(t, http.StatusServiceUnavailable), "/readyz", time.Second); err == nil {
+		t.Error("503: no error")
+	}
+	if err := Check(ctx, config.Config{Host: "0.0.0.0", Port: freePort(t)}, "/healthz", time.Second); err == nil {
+		t.Error("nothing listening: no error")
+	}
+}
+
+func TestServeAndHealth(t *testing.T) {
+	port := freePort(t)
+	t.Setenv(config.EnvPrefix+"LISTEN_HOST", "127.0.0.1")
+	t.Setenv(config.EnvPrefix+"LISTEN_PORT", strconv.Itoa(port))
+	cfg, err := config.Load(filepath.Join(t.TempDir(), "missing.yaml"), os.LookupEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	var logs bytes.Buffer
+	go func() { done <- Serve(ctx, cfg, &logs) }()
+
+	healthy := func(args ...string) int {
+		var stdout, stderr bytes.Buffer
+		return Main(append([]string{"health"}, args...), &stdout, &stderr)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for healthy() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("health never passed")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if code := healthy("--ready"); code != 0 {
+		t.Errorf("health --ready: exit %d", code)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("Serve: %v", err)
+	}
+	if code := healthy("--timeout", "1s"); code != 1 {
+		t.Errorf("health after shutdown: exit %d, want 1", code)
+	}
+	t.Setenv(config.EnvPrefix+"LISTEN_PORT", "http")
+	if code := healthy(); code != 2 {
+		t.Errorf("health with a bad config: exit %d, want 2", code)
+	}
+}
+
+func TestServeFailsOnAPortInUse(t *testing.T) {
+	cfg := listen(t, http.StatusOK)
+	cfg.LogLevel = "DEBUG"
+	if err := Serve(context.Background(), cfg, &bytes.Buffer{}); err == nil {
+		t.Error("Serve on a port in use: no error")
+	}
+}
+
+func TestSlogLevel(t *testing.T) {
+	for _, level := range config.LogLevels {
+		if got := slogLevel(level).String(); !strings.HasPrefix(level, got) {
+			t.Errorf("slogLevel(%s) = %s", level, got)
+		}
+	}
+}
+[% endif %]

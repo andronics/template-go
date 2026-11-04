@@ -1,0 +1,160 @@
+package config
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// env is a fake environment for Load.
+func env(vars map[string]string) LookupFunc {
+	return func(name string) (string, bool) {
+		v, ok := vars[name]
+		return v, ok
+	}
+}
+
+// write puts text in a file under the test's temp dir and returns its path.
+func write(t *testing.T, name, text string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func load(t *testing.T, path string, vars map[string]string) Config {
+	t.Helper()
+	cfg, err := Load(path, env(vars))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return cfg
+}
+
+func TestDefaultsWhenTheFileIsMissing(t *testing.T) {
+	cfg := load(t, filepath.Join(t.TempDir(), "missing.yaml"), nil)
+	if cfg.LogLevel != "INFO" {
+		t.Errorf("LogLevel = %q, want INFO", cfg.LogLevel)
+	}
+	for _, s := range Settings {
+		if cfg.Sources[s.Key] != "default" {
+			t.Errorf("%s came from %q, want default", s.Key, cfg.Sources[s.Key])
+		}
+	}
+}
+
+func TestPrecedence(t *testing.T) {
+	path := write(t, "config.yaml", "log_level: ERROR\n")
+	secret := write(t, "level", "debug\n")
+
+	if cfg := load(t, path, nil); cfg.LogLevel != "ERROR" || cfg.Sources["log_level"] != "file" {
+		t.Errorf("file: got %q from %q", cfg.LogLevel, cfg.Sources["log_level"])
+	}
+	vars := map[string]string{EnvPrefix + "LOG_LEVEL": "WARNING"}
+	if cfg := load(t, path, vars); cfg.LogLevel != "WARNING" || cfg.Sources["log_level"] != EnvPrefix+"LOG_LEVEL" {
+		t.Errorf("env over file: got %q from %q", cfg.LogLevel, cfg.Sources["log_level"])
+	}
+	vars[EnvPrefix+"LOG_LEVEL_FILE"] = secret
+	if cfg := load(t, path, vars); cfg.LogLevel != "DEBUG" || cfg.Sources["log_level"] != EnvPrefix+"LOG_LEVEL_FILE" {
+		t.Errorf("_FILE over env: got %q from %q", cfg.LogLevel, cfg.Sources["log_level"])
+	}
+}
+
+func TestConfigEnvNamesTheFile(t *testing.T) {
+	path := write(t, "elsewhere.yaml", "log_level: DEBUG\n")
+	if cfg := load(t, "", map[string]string{ConfigEnv: path}); cfg.LogLevel != "DEBUG" {
+		t.Errorf("LogLevel = %q, want DEBUG from %s", cfg.LogLevel, ConfigEnv)
+	}
+}
+
+func TestEnvNames(t *testing.T) {
+	for _, s := range Settings {
+		if !strings.HasPrefix(s.Env(), EnvPrefix) || strings.Contains(s.Env(), ".") {
+			t.Errorf("%s: env %q", s.Key, s.Env())
+		}
+	}
+}
+
+func TestErrors(t *testing.T) {
+	cases := map[string]struct {
+		file string
+		vars map[string]string
+		want string
+	}{
+		"bad log level":    {vars: map[string]string{EnvPrefix + "LOG_LEVEL": "LOUD"}, want: "log_level: expected one of"},
+		"not a mapping":    {file: "- a\n- b\n", want: "the top level must be a mapping"},
+		"not YAML":         {file: "log_level: [\n", want: "cannot read"},
+		"a list as string": {file: "log_level: [INFO]\n", want: "log_level: expected string"},
+		"missing _FILE":    {vars: map[string]string{EnvPrefix + "LOG_LEVEL_FILE": "/nonexistent/level"}, want: "cannot read " + EnvPrefix + "LOG_LEVEL_FILE"},
+[% if kind == 'service' %]
+
+		"port not a number": {vars: map[string]string{EnvPrefix + "LISTEN_PORT": "http"}, want: "listen.port: expected integer"},
+		"port a float":      {file: "listen:\n  port: 0.5\n", want: "listen.port: expected integer, got 0.5"},
+		"port out of range": {vars: map[string]string{EnvPrefix + "LISTEN_PORT": "70000"}, want: "is not a TCP port"},
+[% endif %]
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "missing.yaml")
+			if c.file != "" {
+				path = write(t, "config.yaml", c.file)
+			}
+			_, err := Load(path, env(c.vars))
+			var cfgErr *Error
+			if !errors.As(err, &cfgErr) || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("Load: %v, want a config error with %q", err, c.want)
+			}
+		})
+	}
+}
+[% if kind == 'service' %]
+
+func TestServiceSettings(t *testing.T) {
+	path := write(t, "config.yaml", "listen:\n  host: 127.0.0.1\n  port: 9000\nstate_dir: /srv/state\n")
+	cfg := load(t, path, map[string]string{EnvPrefix + "LISTEN_PORT": " 9001 "})
+	if cfg.Host != "127.0.0.1" || cfg.Port != 9001 || cfg.StateDir != "/srv/state" {
+		t.Errorf("got %+v", cfg)
+	}
+	if cfg.Sources["listen.host"] != "file" || cfg.Sources["listen.port"] != EnvPrefix+"LISTEN_PORT" {
+		t.Errorf("sources %v", cfg.Sources)
+	}
+}
+[% endif %]
+
+func TestCoerce(t *testing.T) {
+	flag := Setting{Key: "flag", Default: false}
+	for raw, want := range map[any]bool{"yes": true, "off": false, true: true, " 1 ": true} {
+		if got, err := coerce(flag, raw); err != nil || got != want {
+			t.Errorf("coerce(%v) = %v, %v; want %v", raw, got, err, want)
+		}
+	}
+	if _, err := coerce(flag, "maybe"); err == nil {
+		t.Error("coerce(maybe) to a boolean: no error")
+	}
+	name := Setting{Key: "name", Default: ""}
+	if got, err := coerce(name, 2.5); err != nil || got != "2.5" {
+		t.Errorf("coerce(2.5) to a string = %v, %v", got, err)
+	}
+	count := Setting{Key: "count", Default: 0}
+	if got, err := coerce(count, 3); err != nil || got != 3 {
+		t.Errorf("coerce(3) = %v, %v", got, err)
+	}
+}
+
+func TestAnEmptyFileIsDefaults(t *testing.T) {
+	if cfg := load(t, write(t, "config.yaml", ""), nil); cfg.Sources["log_level"] != "default" {
+		t.Errorf("sources %v", cfg.Sources)
+	}
+}
+
+func TestAnUnreadableFileIsAnError(t *testing.T) {
+	_, err := Load(t.TempDir(), env(nil)) // a directory
+	var cfgErr *Error
+	if !errors.As(err, &cfgErr) {
+		t.Fatalf("Load(a directory): %v, want a config error", err)
+	}
+}

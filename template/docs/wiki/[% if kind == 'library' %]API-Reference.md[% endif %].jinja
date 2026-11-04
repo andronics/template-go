@@ -1,0 +1,17 @@
+[% import 'includes/layer.jinja' as layer with context %]
+# API Reference
+
+## Public API
+
+Generated from the code (`go doc -all`): don't edit the block, run `[[ layer.gen_wiki ]]`.
+
+<!-- generated:start api -->
+<!-- generated:end api -->
+
+<!-- guidance: beyond the generated reference of [[ layer.public_api ]]: an example for each entry point, and the errors a caller should handle. Anything unexported is internal. -->
+
+## Stability
+
+The public API follows [semantic versioning](https://semver.org/): breaking changes only in a major release (a minor one before 1.0), and they're announced in the CHANGELOG.
+
+<!-- guidance: anything experimental or deprecated, and its removal plan. -->

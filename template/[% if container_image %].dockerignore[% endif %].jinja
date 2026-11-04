@@ -1,0 +1,38 @@
+[% import 'includes/layer.jinja' as layer with context %]
+# Only what the Dockerfile copies needs to be in the build context.
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+[% include 'includes/ignore/dockerignore.jinja' %]
+.graphify/
+graphify-out/
+
+# IDEs and AI assistants
+.vscode/
+.idea/
+.cursor/
+.claude/
+*.swp
+*~
+
+# Not needed in the image
+tests/
+scripts/
+docs/
+*.md
+!README.md
+contrib/docker/
+contrib/k8s/
+contrib/systemd/
+.github/
+
+# Secrets and local state: never in an image
+.env
+.env.*
+secrets/
+data/
+*.log
+.DS_Store

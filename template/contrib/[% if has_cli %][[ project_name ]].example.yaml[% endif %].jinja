@@ -1,0 +1,19 @@
+# [[ project_name ]] configuration: every setting, with its default.
+#
+# Copy to /etc/[[ project_name ]]/config.yaml (or point [[ env_prefix ]]CONFIG / --config
+# at it). Every key can also be set as an environment variable,
+# [[ env_prefix ]]<KEY> (dots become underscores), or read from a file with
+# [[ env_prefix ]]<KEY>_FILE. Secrets belong in _FILE, never in this file.
+# Full reference: the wiki's In-Depth-Configuration page.
+
+# DEBUG, INFO, WARNING or ERROR
+log_level: INFO
+[% if kind == 'service' %]
+
+listen:
+  host: 0.0.0.0
+  port: [[ port ]]
+
+# Persistent state
+state_dir: /var/lib/[[ project_name ]]
+[% endif %]

@@ -1,6 +1,6 @@
 # 0001: The go stack overlay
 
-Status: Accepted (2026-11-04)
+Status: Approved (2026-11-04)
 Date: 2026-11-04
 Authors: Stephen Cox
 

@@ -577,3 +577,45 @@ def test_lints_the_integration_tests(project: Path, variant: str) -> None:
     assert config["version"] == "2" and config["run"]["build-tags"] == ["integration"]
     assert config["formatters"]["settings"]["goimports"]["local-prefixes"] == ["github.com/metalayerlab/demo"]
     assert (project / "tests/integration/doc_test.go").read_text().startswith("//go:build integration\n")
+
+
+FAKE_GH = """#!/bin/sh
+# gh pr view prints the body in $FAKE_BODY; gh pr edit records its arguments and stdin in $FAKE_EDIT.
+case "$1 $2" in
+  "pr view") cat "$FAKE_BODY" ;;
+  "pr edit") { echo "$*"; cat; } > "$FAKE_EDIT" ;;
+  *) echo "fake gh: unexpected $*" >&2; exit 2 ;;
+esac
+"""
+
+
+@pytest.mark.parametrize(("body", "edited"), [
+    ("* drop the old flag ([1279ede](https://github.com/o/r/commit/1279ede)), closes [#35](https://github.com/o/r/issues/35)",
+     "* drop the old flag ([1279ede](https://github.com/o/r/commit/1279ede)), refs [#35](https://github.com/o/r/issues/35)"),
+    ("* drop the old flag ([1279ede](https://github.com/o/r/commit/1279ede))", None),
+], ids=["closes", "no-closes"])  # fmt: skip
+def test_release_pr_never_closes_issues(project: Path, tmp_path: Path, body: str, edited: str | None) -> None:
+    """release-please 17.6.0 lists footer issues as ", closes" in the Release PR body: the step after
+    it, run as Actions runs it with a fake gh, says ", refs" instead, and edits the PR only when that changes it."""
+    steps = yaml.safe_load((project / ".github/workflows/go-release.yml").read_text())["jobs"]["release-please"]["steps"]
+    ids = [s.get("id") for s in steps]
+    (guard,) = [s for s in steps if s.get("name") == "Keep the Release PR from closing issues"]
+    assert steps.index(guard) == ids.index("release") + 1
+    assert guard["if"] == "steps.release.outputs.pr != ''"
+    assert guard["env"]["PR"] == "${{ fromJSON(steps.release.outputs.pr).number }}"
+    assert guard["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token || github.token }}"
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    (bin_ / "gh").write_text(FAKE_GH)
+    (bin_ / "gh").chmod(0o755)
+    (tmp_path / "step.sh").write_text(guard["run"])
+    (tmp_path / "body.md").write_text(body + "\n")
+    env = {**os.environ, "PATH": f"{bin_}{os.pathsep}{os.environ['PATH']}", "PR": "7", "GITHUB_REPOSITORY": "o/r",
+           "FAKE_BODY": str(tmp_path / "body.md"), "FAKE_EDIT": str(tmp_path / "edit.txt")}  # fmt: skip
+    result = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", str(tmp_path / "step.sh")],
+                            env=env, capture_output=True, text=True)  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    if edited is None:
+        assert not (tmp_path / "edit.txt").exists()
+    else:
+        assert (tmp_path / "edit.txt").read_text() == f"pr edit 7 -R o/r --body-file -\n{edited}\n"

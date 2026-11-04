@@ -57,8 +57,12 @@ jobs:
         if: steps.release.outputs.pr != ''
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
-          PR: ${{ fromJSON(steps.release.outputs.pr).number }}
+          # The raw output, parsed in run: Actions evaluates env even when if: skips the step,
+          # and fromJSON fails on the empty output of a run that opens no Release PR.
+          PR_JSON: ${{ steps.release.outputs.pr }}
         run: |
+          # jq is on GitHub's runners.
+          PR=$(jq -r .number <<<"$PR_JSON")
           body=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body --jq .body)
           fixed=${body//, closes /, refs }
           if [ "$body" = "$fixed" ]; then echo "Release PR #$PR closes no issues"; exit 0; fi

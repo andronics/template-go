@@ -588,6 +588,10 @@ case "$1 $2" in
 esac
 """
 
+# release-please-action's pr output, as it sets it when it opens or updates a Release PR.
+RELEASE_PR = json.dumps({"headBranchName": "release-please--branches--main", "baseBranchName": "main", "number": 7,
+                         "title": "chore(main): release 1.2.0", "body": "", "labels": [], "files": []})  # fmt: skip
+
 
 @pytest.mark.parametrize(("body", "edited"), [
     ("* drop the old flag ([1279ede](https://github.com/o/r/commit/1279ede)), closes [#35](https://github.com/o/r/issues/35)",
@@ -602,7 +606,7 @@ def test_release_pr_never_closes_issues(project: Path, tmp_path: Path, body: str
     (guard,) = [s for s in steps if s.get("name") == "Keep the Release PR from closing issues"]
     assert steps.index(guard) == ids.index("release") + 1
     assert guard["if"] == "steps.release.outputs.pr != ''"
-    assert guard["env"]["PR"] == "${{ fromJSON(steps.release.outputs.pr).number }}"
+    assert guard["env"]["PR_JSON"] == "${{ steps.release.outputs.pr }}"
     assert guard["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token || github.token }}"
     bin_ = tmp_path / "bin"
     bin_.mkdir()
@@ -610,7 +614,7 @@ def test_release_pr_never_closes_issues(project: Path, tmp_path: Path, body: str
     (bin_ / "gh").chmod(0o755)
     (tmp_path / "step.sh").write_text(guard["run"])
     (tmp_path / "body.md").write_text(body + "\n")
-    env = {**os.environ, "PATH": f"{bin_}{os.pathsep}{os.environ['PATH']}", "PR": "7", "GITHUB_REPOSITORY": "o/r",
+    env = {**os.environ, "PATH": f"{bin_}{os.pathsep}{os.environ['PATH']}", "PR_JSON": RELEASE_PR, "GITHUB_REPOSITORY": "o/r",
            "FAKE_BODY": str(tmp_path / "body.md"), "FAKE_EDIT": str(tmp_path / "edit.txt")}  # fmt: skip
     result = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", str(tmp_path / "step.sh")],
                             env=env, capture_output=True, text=True)  # fmt: skip
@@ -619,3 +623,19 @@ def test_release_pr_never_closes_issues(project: Path, tmp_path: Path, body: str
         assert not (tmp_path / "edit.txt").exists()
     else:
         assert (tmp_path / "edit.txt").read_text() == f"pr edit 7 -R o/r --body-file -\n{edited}\n"
+
+
+def test_release_never_parses_an_empty_output(project: Path) -> None:
+    """release-please sets no pr output on a push that opens or updates no Release PR, and Actions evaluates a
+    step's env (and with) even when its if: skips it: fromJSON on that empty output fails the whole run. Every
+    fromJSON on a step or job output must sit behind `<output> &&`, and the Release PR step reads the raw output."""
+    text = (project / ".github/workflows/go-release.yml").read_text()
+    for expr in re.findall(r"\$\{\{(.*?)\}\}", text):
+        for arg in re.findall(r"fromJSON\(\s*([^)]*?)\s*\)", expr):
+            if re.fullmatch(r"(steps|needs)\.[\w-]+\.outputs\.[\w-]+", arg):
+                assert f"{arg} && fromJSON({arg})" in expr, f"unguarded fromJSON on an output that can be empty: {expr}"
+    steps = yaml.safe_load(text)["jobs"]["release-please"]["steps"]
+    (guard,) = [s for s in steps if s.get("name") == "Keep the Release PR from closing issues"]
+    assert guard["if"] == "steps.release.outputs.pr != ''"
+    # With pr empty, PR_JSON evaluates to "" without error and if: skips the run script.
+    assert all("fromJSON" not in str(v) for v in guard["env"].values())
